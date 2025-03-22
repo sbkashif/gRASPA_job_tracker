@@ -1,0 +1,26 @@
+# Database configuration
+database_path: /path/to/cif/database
+output_path: /path/to/output/directory
+
+# Batch settings
+batch_size: 100
+max_concurrent_jobs: 5
+
+# Script paths
+partial_charge_script: /path/to/partial_charge_script.py
+simulation_script: /path/to/simulation_script.sh
+simulation_input_file: /path/to/simulation_input.dat
+
+# SLURM configuration
+slurm:
+  account: your_account
+  partition: normal
+  time: 24:00:00
+  nodes: 1
+  ntasks_per_node: 16
+  mem: 32GB
+
+# Environment setup (optional)
+environment_setup: |
+  module load conda
+  source activate my_env
