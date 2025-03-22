@@ -15,18 +15,29 @@ A Python package for automating SLURM job submissions for GRASPA simulations wit
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/graspa-job-tracker.git
-cd graspa-job-tracker
+git clone https://github.com/sbkashif/gRASPA_job_tracker.git
+cd gRASPA_job_tracker
+
+# Create a virtual environment
+conda create -n graspa_job_tracker python=3.9
+conda activate graspa_job_tracker
+
+# Install dependencies
+pip install -r requirements.txt
 
 # Install the package
 pip install -e .
 ```
 
+You would also need to have the `gRASPA` package installed in your environment. You can install it from the following repository: 
+
+`https://github.com/snurr-group/gRASPA`
+
 ## Usage
 
 1. Create a configuration file:
 ```bash
-graspa-job-tracker --create-default-config my_config.yaml
+graspa_job_tracker --create-default-config my_config.yaml
 ```
 
 2. Edit the configuration file with your specific settings:
@@ -36,7 +47,7 @@ graspa-job-tracker --create-default-config my_config.yaml
 
 3. Run the job tracker:
 ```bash
-graspa-job-tracker --config my_config.yaml
+graspa_job_tracker --config my_config.yaml
 ```
 
 ## Configuration Options
