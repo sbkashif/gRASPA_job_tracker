@@ -1,4 +1,4 @@
-# GRASPA Job Tracker
+# gRASPA Job Tracker
 
 A Python package for automating SLURM job submissions for GRASPA simulations with CIF files.
 
