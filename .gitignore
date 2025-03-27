@@ -35,6 +35,9 @@ ENV/
 # All files in examples/data directory recursively
 examples/data/**
 
+# Slurm logs
+slurm-*.out
+
 # OS specific
 .DS_Store
 Thumbs.db
