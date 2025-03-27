@@ -1,32 +1,101 @@
 import os
 import subprocess
-from typing import Dict, Any, List, Optional
+import importlib
+import sys
+from typing import Dict, Any, List, Optional, Callable, Union, Tuple, Set
+import tempfile
+from pathlib import Path
 
 class JobScheduler:
-    """Handle SLURM job submission and management"""
+    """Handle SLURM job submission and management with support for Python and Bash scripts"""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], batch_range: Optional[Tuple[int, int]] = None):
         """
         Initialize the job scheduler
         
         Args:
             config: Configuration dictionary
+            batch_range: Optional tuple of (min_batch_id, max_batch_id) to limit which batches are processed
         """
         self.config = config
-        self.slurm_config = config['slurm']
-        self.output_path = config['output_path']
-        self.partial_charge_script = config['partial_charge_script']
-        self.simulation_script = config['simulation_script']
-        self.simulation_input_file = config['simulation_input_file']
+        self.slurm_config = config['slurm_config']
+        
+        # Get output paths from config with auto-generated values
+        self.output_path = config['output']['output_dir']
+        self.scripts_dir = config['output']['scripts_dir']
+        self.logs_dir = config['output']['logs_dir']
+        
+        # Scripts and templates
+        self.scripts = config.get('scripts', {})
+        self.templates = config.get('file_templates', {})
         
         # Create directories for job scripts and logs
-        self.scripts_dir = os.path.join(self.output_path, 'job_scripts')
-        self.logs_dir = os.path.join(self.output_path, 'job_logs')
-        
         os.makedirs(self.scripts_dir, exist_ok=True)
         os.makedirs(self.logs_dir, exist_ok=True)
+        
+        # Set batch range limits if provided
+        self.min_batch_id = None
+        self.max_batch_id = None
+        if batch_range:
+            self.min_batch_id, self.max_batch_id = batch_range
+            
+        # Dictionary to track batch_id to job_id mapping
+        self.batch_job_map = {}
+        
+        # Create a file to store batch-job mappings
+        self.batch_job_map_file = os.path.join(self.output_path, 'batch_job_map.txt')
+        
+        # Load existing batch-job mappings if file exists
+        self._load_batch_job_map()
     
-    def create_job_script(self, batch_id: int, batch_files: List[str]) -> str:
+    def _load_batch_job_map(self):
+        """Load existing batch-job mappings from file if it exists"""
+        if os.path.exists(self.batch_job_map_file):
+            try:
+                with open(self.batch_job_map_file, 'r') as f:
+                    for line in f:
+                        if line.strip():
+                            parts = line.strip().split()
+                            if len(parts) >= 2:
+                                batch_id, job_id = parts[0], parts[1]
+                                self.batch_job_map[job_id] = int(batch_id)
+            except Exception as e:
+                print(f"Error loading batch-job mapping: {e}")
+    
+    def _save_batch_job_map(self):
+        """Save batch-job mappings to file"""
+        try:
+            with open(self.batch_job_map_file, 'w') as f:
+                for job_id, batch_id in self.batch_job_map.items():
+                    f.write(f"{batch_id} {job_id}\n")
+        except Exception as e:
+            print(f"Error saving batch-job mapping: {e}")
+    
+    def is_batch_in_range(self, batch_id: int) -> bool:
+        """
+        Check if a batch ID is within the specified range
+        
+        Args:
+            batch_id: Batch ID to check
+            
+        Returns:
+            True if batch is in range or no range was specified, False otherwise
+        """
+        # If no range was specified, all batches are in range
+        if self.min_batch_id is None and self.max_batch_id is None:
+            return True
+            
+        # Check minimum bound if specified
+        if self.min_batch_id is not None and batch_id < self.min_batch_id:
+            return False
+            
+        # Check maximum bound if specified
+        if self.max_batch_id is not None and batch_id > self.max_batch_id:
+            return False
+            
+        return True
+    
+    def create_job_script(self, batch_id: int, batch_files: List[str]) -> Optional[str]:
         """
         Create a SLURM job script for processing a batch of CIF files
         
@@ -35,73 +104,42 @@ class JobScheduler:
             batch_files: List of CIF file paths in the batch
             
         Returns:
-            Path to the created job script
+            Path to the created job script or None if batch is out of range
         """
+        # Ensure batch_id is an integer
+        batch_id = int(batch_id)
+        
+        # Skip if batch is outside the specified range
+        if not self.is_batch_in_range(batch_id):
+            print(f"Skipping batch {batch_id}: outside specified batch range")
+            return None
+        
         script_path = os.path.join(self.scripts_dir, f'job_batch_{batch_id}.sh')
         
-        # Create batch-specific output directory
-        batch_output_dir = os.path.join(self.output_path, f'batch_{batch_id}')
+        # Ensure batch_files are all strings
+        batch_files = [str(file_path) for file_path in batch_files if file_path]
+        
+        # Create batch-specific output directory under results_dir
+        batch_output_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
         os.makedirs(batch_output_dir, exist_ok=True)
         
-        # Create script content
-        script_content = "#!/bin/bash\n\n"
-        
-        # Add SLURM directives
-        script_content += f"#SBATCH --job-name=graspa_batch_{batch_id}\n"
-        script_content += f"#SBATCH --output={os.path.join(self.logs_dir, f'job_batch_{batch_id}_%j.out')}\n"
-        script_content += f"#SBATCH --error={os.path.join(self.logs_dir, f'job_batch_{batch_id}_%j.err')}\n"
-        
-        for key, value in self.slurm_config.items():
-            script_content += f"#SBATCH --{key}={value}\n"
-        
-        script_content += "\n"
-        
-        # Add environment setup if provided
-        if 'environment_setup' in self.config:
-            script_content += f"{self.config['environment_setup']}\n\n"
-        
-        # Create a file with the list of CIF files for this batch
-        batch_list_file = os.path.join(batch_output_dir, "cif_file_list.txt")
-        with open(batch_list_file, 'w') as f:
-            for cif_file in batch_files:
-                f.write(f"{cif_file}\n")
-        
-        # Add commands to process the batch
-        script_content += f"echo 'Starting job for batch {batch_id}'\n\n"
-        
-        # Add command to generate partial charges using the provided Python script
-        partial_charge_output_dir = os.path.join(batch_output_dir, "partial_charges")
-        os.makedirs(partial_charge_output_dir, exist_ok=True)
-        
-        script_content += f"echo 'Step 1: Generating partial charges'\n"
-        script_content += f"python {self.partial_charge_script} --input {batch_list_file} --output {partial_charge_output_dir}\n"
-        script_content += f"partial_charge_status=$?\n\n"
-        
-        # Check if partial charge generation was successful
-        script_content += "if [ $partial_charge_status -ne 0 ]; then\n"
-        script_content += "    echo 'Partial charge generation failed with status $partial_charge_status'\n"
-        script_content += f"    echo '{batch_id}' >> {os.path.join(self.output_path, 'failed_batches.txt')}\n"
-        script_content += "    exit 1\n"
-        script_content += "fi\n\n"
-        
-        # Add command to run GRASPA simulations using the bash script
-        simulation_output_dir = os.path.join(batch_output_dir, "simulations")
-        os.makedirs(simulation_output_dir, exist_ok=True)
-        
-        script_content += f"echo 'Step 2: Running GRASPA simulations'\n"
-        script_content += f"bash {self.simulation_script} {partial_charge_output_dir} {self.simulation_input_file} {simulation_output_dir}\n"
-        script_content += f"simulation_status=$?\n\n"
-        
-        # Check if simulation was successful
-        script_content += "if [ $simulation_status -ne 0 ]; then\n"
-        script_content += "    echo 'Simulation failed with status $simulation_status'\n"
-        script_content += f"    echo '{batch_id}' >> {os.path.join(self.output_path, 'failed_batches.txt')}\n"
-        script_content += "    exit 1\n"
-        script_content += "fi\n\n"
-        
-        # Write completion status
-        script_content += f"echo 0 > {os.path.join(batch_output_dir, 'exit_status.log')}\n"
-        script_content += "echo 'Job completed successfully'\n"
+        # Start with custom template if provided, otherwise use default template
+        if 'slurm_template' in self.templates and os.path.exists(self.templates['slurm_template']):
+            with open(self.templates['slurm_template'], 'r') as f:
+                script_content = f.read()
+                
+            # Replace template variables
+            replacements = {
+                '${BATCH_NUMBER}': str(batch_id),
+                '${NUM_SAMPLES}': str(len(batch_files)),
+                '${OUTPUT_DIR}': batch_output_dir,
+            }
+            
+            for placeholder, value in replacements.items():
+                script_content = script_content.replace(placeholder, value)
+        else:
+            # Create default script content
+            script_content = self._create_default_job_script(batch_id, batch_files, batch_output_dir)
         
         # Write script to file
         with open(script_path, 'w') as f:
@@ -112,29 +150,513 @@ class JobScheduler:
         
         return script_path
     
-    def submit_job(self, script_path: str) -> Optional[str]:
+    def _create_default_job_script(self, batch_id: int, batch_files: List[str], batch_output_dir: str) -> str:
+        """Create default SLURM job script content with exit status logging."""
+        script_content = "#!/bin/bash\n\n"
+        
+        #Get the number of structures in the batch
+        num_structures = len(batch_files)
+        
+        # Add SLURM directives
+        script_content += f"#SBATCH --job-name=g_{batch_id}\n"
+        script_content += f"#SBATCH -o {os.path.join(self.logs_dir, f'batch_{batch_id}_%j.out')}\n"
+        script_content += f"#SBATCH -e {os.path.join(self.logs_dir, f'batch_{batch_id}_%j.err')}\n"
+        script_content += f"#SBATCH --nodes=1\n"
+        script_content += f"#SBATCH --ntasks-per-node=1\n"
+        script_content += f"#SBATCH --gpus-per-node=1\n"
+        script_content += f"#SBATCH --cpus-per-task={num_structures}\n"
+        script_content += f"#SBATCH --gpu-bind=closest\n"
+        script_content += f"#SBATCH --no-requeue\n"
+        script_content += "\n"
+        
+        # Add custom SLURM configuration, preserving the time format
+        for key, value in self.slurm_config.items():
+            # Make sure time is in HH:MM:SS format, not seconds
+            if key == 'time' and isinstance(value, (int, float)) and not isinstance(value, str):
+                # Convert seconds back to HH:MM:SS if needed
+                hours, remainder = divmod(int(value), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                formatted_time = f"{hours}:{minutes:02d}:{seconds:02d}"
+                script_content += f"#SBATCH --{key}={formatted_time}\n"
+            else:
+                script_content += f"#SBATCH --{key}={value}\n"
+        
+        script_content += "\n"
+        
+        # Add environment setup if provided
+        if 'environment_setup' in self.config:
+            script_content += f"{self.config['environment_setup']}\n\n"
+        
+        # Set GRASPA environment variables using project_root from config
+        script_content += f"# Set GRASPA environment variables\n"
+        
+        # Use project_root directly from config without recalculation
+        project_root = self.config.get('project_root', '')
+        
+        # Always set scripts dir to the standard location
+        graspa_scripts_dir = os.path.join(project_root, 'gRASPA_job_tracker', 'scripts')
+        
+        # Export the environment variables
+        script_content += f"export GRASPA_SCRIPTS_DIR=\"{graspa_scripts_dir}\"\n"
+        script_content += f"export GRASPA_ROOT=\"{project_root}\"\n\n"
+        
+        # Extract forcefield paths and set them as environment variables
+        script_content += "# Set environment variables for forcefield paths\n"
+        forcefield_files = self.config.get('forcefield_files', {})
+        for key, path in forcefield_files.items():
+            # Set as environment variable - path substitution already done by config_parser
+            script_content += f"export FF_{key.upper()}=\"{path}\"\n"
+        
+        # Extract template files and variables in one pass to avoid redundancy
+        script_content += "\n# Handle simulation template and variables\n"
+        if 'run_file_templates' in self.config:
+            for key, template_config in self.config['run_file_templates'].items():
+                if isinstance(template_config, dict):
+                    # Process template path - path substitution already done by config_parser
+                    file_path = template_config.get('file_path', '')
+                    
+                    if file_path and os.path.exists(file_path):
+                        script_content += f"export TEMPLATE_{key.upper()}=\"{file_path}\"\n"
+                    
+                    # Process variables specific to this template
+                    if 'variables' in template_config:
+                        for var_key, var_value in template_config['variables'].items():
+                            script_content += f"export SIM_VAR_{var_key.upper()}=\"{var_value}\"\n"
+
+        # Create a file with the list of CIF files for this batch
+        batch_list_file = os.path.join(batch_output_dir, "cif_file_list.txt")
+        script_content += f"# Create list of CIF files for this batch\n"
+        script_content += f"cat > {batch_list_file} << 'EOF'\n"
+        for cif_file in batch_files:
+            script_content += f"{cif_file}\n"
+        script_content += "EOF\n\n"
+        
+        # Add commands to process the batch
+        script_content += f"echo 'Starting job for batch {batch_id} with {len(batch_files)} CIF files'\n"
+        script_content += "echo 'Job started at: ' `date`\n\n"
+        
+        # Add workflow steps based on available scripts
+        script_content += self._generate_workflow_steps(batch_id, batch_output_dir, batch_list_file)
+        
+        # Write completion status
+        script_content += f"\n# Write completion status\n"
+        script_content += f"echo $? > {os.path.join(batch_output_dir, 'exit_status.log')}\n"
+        script_content += "echo 'Job completed at: ' `date`\n"
+        
+        return script_content
+    
+    def _generate_workflow_steps(self, batch_id: int, output_dir: str, file_list: str) -> str:
+        """Generate workflow steps with exit status logging."""
+        steps_content = ""
+        
+        # Check if a workflow is defined in the config
+        workflow = self.config.get('workflow', None)
+        
+        # If no explicit workflow is defined, use the scripts section for sequential processing
+        if not workflow:
+            # Create a default workflow from available scripts - keeping original order
+            workflow = []
+            for step_name, script_path in self.scripts.items():
+                if script_path:  # Only include steps with configured scripts
+                    workflow.append({
+                        'name': step_name,
+                        'script': script_path,
+                        'output_subdir': step_name,
+                        'required': True  # All steps are required by default
+                    })
+        
+        # Track the previous step's output directory to use as input for the next step
+        prev_step_output_dir = None
+        
+        # Process each workflow step in sequence
+        for i, step in enumerate(workflow):
+            step_name = step.get('name', f'step_{i+1}')
+            script_path = step.get('script', self.scripts.get(step_name, ''))
+            output_subdir = step.get('output_subdir', step_name)
+            required = step.get('required', True)
+            
+            # Skip if no script is defined for this step
+            if not script_path:
+                continue
+                
+            step_output_dir = os.path.join(output_dir, output_subdir)
+            
+            # For the first step, use the original file_list as input
+            # For subsequent steps, use the previous step's output directory
+            step_input = file_list if prev_step_output_dir is None else prev_step_output_dir
+            
+            # Add step header
+            steps_content += f"echo 'Step {i+1}: {step_name.replace('_', ' ').title()}'\n"
+            steps_content += f"mkdir -p {step_output_dir}\n"
+            
+            # Special case: Always treat mps_run as a bash script regardless of extension
+            is_bash_script = (script_path.endswith(('.sh', '.bash')) or 
+                             'mps_run' in script_path or 
+                             step_name == 'simulation')
+            
+            if is_bash_script:
+                steps_content += self._generate_bash_step(
+                    script_path=script_path,
+                    step_name=step_name,
+                    batch_id=batch_id,
+                    input_file=step_input,  # Use the appropriate input
+                    output_dir=step_output_dir,
+                    step=step,
+                    is_first_step=(prev_step_output_dir is None)  # Indicate if this is the first step
+                )
+            else:
+                # Python module or script - use directly
+                steps_content += self._generate_python_step(
+                    script_path=script_path,
+                    step_name=step_name,
+                    batch_id=batch_id,
+                    input_file=step_input,  # Use the appropriate input
+                    output_dir=step_output_dir,
+                    step=step,
+                    is_first_step=(prev_step_output_dir is None)  # Indicate if this is the first step
+                )
+            
+            # Add status check
+            step_var_name = f"{step_name.lower().replace('-', '_')}_status"
+            steps_content += f"{step_var_name}=$?\n"
+            steps_content += f"if [ ${step_var_name} -ne 0 ]; then\n"
+            steps_content += f"    echo '{step_name} failed'\n"
+            
+            if required:
+                steps_content += f"    echo '{batch_id}' >> {os.path.join(self.output_path, 'failed_batches.txt')}\n"
+                steps_content += "    exit 1\n"
+            else:
+                steps_content += "    # Continue despite failure in this optional step\n"
+                
+            steps_content += "fi\n\n"
+            
+            # Ensure the script does not exit prematurely after the simulation step
+            if step_name == 'simulation':
+                steps_content += f"# Ensure transition to the next step after simulation\n"
+                steps_content += f"echo 'Simulation step completed. Proceeding to analysis...'\n\n"
+            
+            # Update the previous step output dir for the next iteration
+            prev_step_output_dir = step_output_dir
+
+            steps_content += f"echo $? > {os.path.join(output_dir, step['output_subdir'], 'exit_status.log')}\n"
+        
+        return steps_content
+    
+    def _generate_bash_step(self, script_path: str, step_name: str, batch_id: int, 
+                           input_file: str, output_dir: str, step: Dict[str, Any],
+                           is_first_step: bool = False) -> str:
+        """Generate bash script execution commands for a workflow step"""
+        content = ""
+        
+        # Copy template if one is specified and exists
+        template_key = f"{step_name}_input_template"
+        template_path = self.templates.get(template_key, '')
+        if template_path and os.path.exists(template_path):
+            content += f"cp {template_path} {output_dir}/{step_name}.input\n"
+        
+        # Handle special case for mps_run which may be a Python module path
+        is_module = not ('/' in script_path or script_path.endswith(('.sh', '.bash', '.py')))
+        
+        # Special handling for scripts that need to run in their output directory
+        if step.get('change_dir', False) or step_name == 'simulation' or 'mps_run' in script_path:
+            # Handle mps_run specially with a direct path
+            if 'mps_run' in script_path:
+                script_basename = "mps_run.sh"
+                
+                # Get the package root directory
+                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                
+                # Construct the direct path to the script
+                scripts_dir = os.path.join(project_root, 'gRASPA_job_tracker', 'scripts')
+                mps_script_path = os.path.join(scripts_dir, script_basename)
+                script_path = mps_script_path
+            else:
+                script_basename = os.path.basename(script_path)
+            
+            local_script = f"{step_name}_{script_basename}"
+            
+            # Change to output directory
+            content += f"# Change to output directory\n"
+            content += f"cd {output_dir}\n"
+            
+            # Copy script locally
+            content += f"cp {script_path} ./{local_script}\n"
+            content += f"chmod +x ./{local_script}\n"
+            script_to_run = f"./{local_script}"
+            
+            # Add template path if applicable
+            template_env_var = ""
+            template_file_path = None
+            # Find the template path and set environment variable
+            if 'run_file_templates' in self.config and 'simulation_input' in self.config['run_file_templates']:
+                template_config = self.config['run_file_templates']['simulation_input']
+                if isinstance(template_config, dict) and 'file_path' in template_config:
+                    template_file_path = template_config['file_path']
+                    template_env_var = "$TEMPLATE_SIMULATION_INPUT"
+                    
+                    # Generate the template file with variable substitution
+                    if template_file_path and os.path.exists(template_file_path) and 'variables' in template_config:
+                        local_template = f"{step_name}_template.input"
+                        content += f"# Copy and modify template with variables\n"
+                        content += f"cp {template_file_path} ./{local_template}\n"
+                        
+                        # Process each variable with a simpler approach
+                        content += f"# Simple variable replacement for template\n"
+                        for var_key, var_value in template_config['variables'].items():
+                            content += f"if grep -q \"^{var_key}\" ./{local_template}; then\n"
+                            content += f"  # Replace existing variable\n"
+                            content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
+                            content += f"else\n"
+                            content += f"  # Add variable if it doesn't exist\n"
+                            content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
+                            content += f"fi\n"
+                        
+                        # Update the template environment variable to point to the modified local template
+                        content += f"export TEMPLATE_SIMULATION_INPUT=\"$(pwd)/{local_template}\"\n"
+            
+            # Execute with batch_id and appropriate arguments
+            content += f"# Execute script locally\n"
+            
+            # Special handling for mps_run - it expects batch_id, input_dir, output_dir, scripts_dir
+            if 'mps_run' in script_path:
+                # For mps_run, input_file is a directory with CIF files if not first step
+                if not is_first_step:
+                    # When input is a directory containing results from previous step
+                    content += f"# Using previous step output directory as input\n"
+                    
+                    # Export template as environment variable instead of argument
+                    if template_env_var and not template_file_path:  # Only if we didn't already set it above
+                        content += f"export TEMPLATE_SIMULATION_INPUT={template_env_var}\n"
+                    
+                    # We're already in the output directory, pass batch_id, input_dir, output_dir, scripts_dir
+                    content += f"bash {script_to_run} {batch_id} {input_file} {scripts_dir} .\n"
+                else:
+                    # For first step or when input_file is a file list
+                    content += f"# First step: setting up input/output directories\n"
+                    # We're already in the output directory, pass batch_id, input_dir, output_dir, scripts_dir
+                    content += f"bash {script_to_run} {batch_id} {input_file} {scripts_dir} .\n"
+                    
+                    # Export template as environment variable instead of argument
+                    if template_env_var and not template_file_path:  # Only if we didn't already set it above
+                        content += f"export TEMPLATE_SIMULATION_INPUT={template_env_var}\n"
+                    
+                    # Also provide input file as an environment variable for mps_run
+                    content += f"export MPS_INPUT_FILE=\"{input_file}\"\n"
+            else:
+                # Regular script execution
+                if template_env_var:
+                    content += f"bash {script_to_run} {batch_id} {input_file} {template_env_var}\n"
+                else:
+                    content += f"bash {script_to_run} {batch_id} {input_file}\n"
+            
+            # Capture exit status and clean up on success
+            content += f"script_status=$?\n"
+            content += f"if [ $script_status -eq 0 ]; then\n"
+            content += f"    # Clean up unnecessary files on success\n"
+            content += f"    rm -f ./{local_script}\n"
+            content += f"fi\n"
+            
+            # Return to original directory and pass through the exit status
+            content += f"cd -\n"
+            
+            # Remove the explicit exit call for mps_run but keep for other scripts
+            # This fixes the premature job termination issue
+            if 'mps_run' in script_path or step_name == 'simulation':
+                # Just use the return command without exit for simulation scripts
+                content += f"# Avoid exit for simulation scripts to prevent premature job termination\n"
+            else:
+                content += f"exit $script_status\n"
+            
+        else:
+            # Regular bash script - run from original location
+            # Get additional arguments if specified
+            args = step.get('args', [input_file, output_dir])
+            
+            # Add template path if applicable
+            template_key = f"{step_name}_input"
+            template_env_var = None
+            if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
+                template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
+                if isinstance(args, list) and template_env_var not in args:
+                    args.append(template_env_var)
+            
+            if isinstance(args, list):
+                args_str = ' '.join([str(arg) for arg in [batch_id] + args])
+            else:
+                args_str = f"{batch_id} {input_file} {output_dir}"
+                if template_env_var:
+                    args_str += f" {template_env_var}"
+                
+            content += f"bash {script_path} {args_str}\n"
+            
+        return content
+    
+    def _generate_python_step(self, script_path: str, step_name: str, batch_id: int, 
+                             input_file: str, output_dir: str, step: Dict[str, Any],
+                             is_first_step: bool = False) -> str:
+        """Generate python script execution commands for a workflow step"""
+        content = ""
+        
+        # Special handling for simulation scripts or those needing to run in output directory
+        if step_name == 'simulation' or step.get('change_dir', False):
+            # Get script basename for local copy if it's a file
+            if '/' in script_path or script_path.endswith('.py'):
+                script_basename = os.path.basename(script_path)
+                local_script = f"{step_name}_{script_basename}"
+                
+                # Change to output directory and copy script locally
+                content += f"# Change to output directory and copy script locally\n"
+                content += f"cd {output_dir}\n"
+                content += f"cp {script_path} ./{local_script}\n"
+                
+                # Get arguments
+                args = step.get('args', [])
+                if not args:
+                    args = [input_file, output_dir]
+                    
+                    # Add template path if applicable
+                    template_key = f"{step_name}_input"
+                    if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
+                        template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
+                        args.append(template_env_var)
+                
+                # Format arguments
+                args_str = ' '.join([str(arg) for arg in [batch_id] + args])
+                
+                # Execute script
+                content += f"# Execute script locally\n"
+                content += f"python ./{local_script} {args_str}\n"
+                
+                # Capture exit status and clean up on success
+                content += f"script_status=$?\n"
+                content += f"if [ $script_status -eq 0]; then\n"
+                content += f"    # Clean up unnecessary files on success\n"
+                content += f"    rm -f ./{local_script}\n"
+                content += f"fi\n"
+                
+                # Return to original directory
+                content += f"cd -\n"
+            else:
+                # It's a module name - run with -m flag in output directory
+                content += f"cd {output_dir}\n"
+                
+                # Get arguments
+                args = step.get('args', [])
+                if not args:
+                    args = [input_file, output_dir]
+                    
+                    # Add template path if applicable
+                    template_key = f"{step_name}_input"
+                    if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
+                        template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
+                        args.append(template_env_var)
+                
+                # Format arguments
+                args_str = ' '.join([str(arg) for arg in [batch_id] + args])
+                
+                # Execute module
+                content += f"python -m {script_path} {args_str}\n"
+                content += f"script_status=$?\n"
+                content += f"cd -\n"
+                
+                # Prevent premature job termination for simulation scripts
+                if step_name == 'simulation':
+                    content += f"# Skip exit for simulation step to prevent premature job termination\n"
+                else:
+                    content += f"exit $script_status\n"
+        else:
+            # Regular Python script/module - run from original location
+            # Get arguments
+            args = step.get('args', [])
+            if not args:
+                args = [input_file, output_dir]
+                
+                # Add template path if applicable
+                template_key = f"{step_name}_input"
+                if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
+                    template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
+                    args.append(template_env_var)
+            
+            # Format arguments
+            args_str = ' '.join([str(arg) for arg in [batch_id] + args])
+            
+            # Generate command based on script path format
+            if '/' in script_path or script_path.endswith('.py'):
+                # It's a file path, run directly
+                content += f"python {script_path} {args_str}\n"
+            else:
+                # It's a module name, use -m flag
+                content += f"python -m {script_path} {args_str}\n"
+        return content
+    
+    def print_job_script(self, script_path: str) -> None:
         """
-        Submit a job to SLURM
+        Print the content of a job script to stdout
         
         Args:
             script_path: Path to the job script
-            
-        Returns:
-            Job ID if submission was successful, None otherwise
         """
         try:
+            with open(script_path, 'r') as f:
+                print("\n===== JOB SCRIPT CONTENT =====")
+                print(f.read())
+                print("==============================\n")
+        except Exception as e:
+            print(f"Error reading job script: {e}")
+    
+    def submit_job(self, script_path: str, dry_run: bool = False, batch_id: Optional[int] = None) -> Optional[str]:
+        """
+        Submit a job to SLURM or perform a dry run
+        
+        Args:
+            script_path: Path to the job script
+            dry_run: If True, only print the job script and don't submit
+            batch_id: The batch ID associated with this job
+            
+        Returns:
+            Job ID if submission was successful, "dry-run" for dry run, None on error or if out of range
+        """
+        # Handle None script_path (when batch is out of range)
+        if script_path is None:
+            return None
+            
+        # Ensure script_path is a string
+        script_path = str(script_path)
+        
+        if not os.path.exists(script_path):
+            print(f"Error: Job script does not exist: {script_path}")
+            return None
+            
+        if dry_run:
+            print(f"[DRY RUN] Job script generated at: {script_path}")
+            self.print_job_script(script_path)
+            print(f"[DRY RUN] To submit manually: sbatch {script_path}")
+            return "dry-run"
+        
+        try:
+            print(f"Submitting job script: {script_path}")
             result = subprocess.run(['sbatch', script_path], 
                                    check=True, 
                                    stdout=subprocess.PIPE, 
                                    stderr=subprocess.PIPE,
                                    universal_newlines=True)
-            
             # Extract job ID from sbatch output (usually something like "Submitted batch job 123456")
             output = result.stdout.strip()
             if "Submitted batch job" in output:
                 job_id = output.split()[-1]
-                return job_id
+                print(f"Job submitted successfully with ID: {job_id}")
+                
+                # Store batch_id to job_id mapping if batch_id is provided
+                if batch_id is not None:
+                    self.batch_job_map[job_id] = batch_id
+                    self._save_batch_job_map()
+                    
+                    # Update the job status CSV file with the new job
+                    self.update_job_status_csv(job_id=job_id, batch_id=batch_id)
+                    
+                return job_id        
             
+            print(f"Job submission output: {output}")
             return None
             
         except subprocess.CalledProcessError as e:
@@ -142,16 +664,36 @@ class JobScheduler:
             print(f"stderr: {e.stderr}")
             return None
     
-    def get_job_status(self, job_id: str) -> str:
+    def get_job_status(self, job_id: str, batch_output_dir: Optional[str] = None) -> str:
         """
-        Get the status of a SLURM job
-        
+        Get the status of a SLURM job or check exit_status.log if available.
+
         Args:
             job_id: SLURM job ID
-            
+            batch_output_dir: Directory containing exit_status.log (optional)
+
         Returns:
             Job status (PENDING, RUNNING, COMPLETED, FAILED, etc.) or 'UNKNOWN' if job not found
         """
+        # Check exit_status.log in the batch's subfolder
+        if batch_output_dir:
+            exit_status_file = os.path.join(batch_output_dir, "exit_status.log")
+            if os.path.exists(exit_status_file):
+                with open(exit_status_file, "r") as f:
+                    status = f.read().strip()
+                    if status == "0":
+                        return "COMPLETED"
+                    else:
+                        return "FAILED"
+
+        # Fallback to SLURM commands
+        # Ensure job_id is a string
+        job_id = str(job_id)
+        
+        # Handle special case for dry-run jobs
+        if job_id == "dry-run":
+            return "DRY-RUN"
+            
         try:
             result = subprocess.run(['squeue', '--job', job_id, '--format=%T', '--noheader'],
                                    check=True,
@@ -165,17 +707,281 @@ class JobScheduler:
             else:
                 # If no output, check if job completed or failed
                 sacct_result = subprocess.run(
-                    ['sacct', '--job', job_id, '--format=State', '--noheader', '--parsable2'],
+                    ['sacct', '-j', job_id, '--format=State', '--noheader', '--parsable2'],
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     universal_newlines=True
                 )
-                
-                if sacct_result.stdout.strip():
-                    return sacct_result.stdout.strip().split('\n')[0]
+                sacct_output = sacct_result.stdout.strip()
+                if sacct_output:
+                    # Get the first state that isn't for a step (like .batch or .extern)
+                    for state in sacct_output.split('\n'):
+                        if state and '.' not in state:
+                            return state
                 
             return 'UNKNOWN'
             
         except subprocess.CalledProcessError:
             return 'UNKNOWN'
+    
+    def get_batch_id_for_job(self, job_id: str) -> Optional[int]:
+        """
+        Get the batch ID associated with a job ID
+        
+        Args:
+            job_id: SLURM job ID
+            
+        Returns:
+            Batch ID if found, None otherwise
+        """
+        return self.batch_job_map.get(job_id)
+    
+    def _format_datetime(self, timestamp):
+        """
+        Format a timestamp as a human-readable date and time string.
+        
+        Args:
+            timestamp: Unix timestamp (float) or timestamp string
+            
+        Returns:
+            Formatted date and time string (YYYY-MM-DD HH:MM:SS)
+        """
+        import datetime
+        
+        # Convert string to float if needed
+        if isinstance(timestamp, str):
+            try:
+                timestamp = float(timestamp)
+            except ValueError:
+                # If it's already a formatted string, return it
+                if len(timestamp) > 10 and "-" in timestamp:
+                    return timestamp
+                return "Unknown"
+        
+        # Return empty string for None or zero timestamps
+        if not timestamp:
+            return ""
+            
+        try:
+            dt = datetime.datetime.fromtimestamp(timestamp)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError, OverflowError):
+            return "Invalid time"
+
+    def update_job_status_csv(self, job_id: str = None, batch_id: int = None):
+        """
+        Update the job_status.csv file with current job statuses.
+        If job_id and batch_id are provided, update only that job.
+        Otherwise, update all jobs in the batch_job_map.
+
+        Args:
+            job_id: Specific job ID to update (optional)
+            batch_id: Specific batch ID to update (optional)
+        """
+        import csv
+        import time
+        
+        csv_file = os.path.join(self.output_path, 'job_status.csv')
+        
+        # Read existing data if file exists
+        job_data = {}
+        if os.path.exists(csv_file):
+            try:
+                with open(csv_file, 'r') as f:
+                    reader = csv.reader(f)
+                    header = next(reader, None)  # Skip header if it exists
+                    for row in reader:
+                        if len(row) >= 3:
+                            batch_id_csv = row[0]
+                            job_data[batch_id_csv] = row
+            except Exception as e:
+                print(f"Warning: Error reading job status CSV: {e}")
+        
+        # Update specific job if provided
+        if job_id and batch_id:
+            batch_id_str = str(batch_id)
+            status = self.get_job_status(job_id)
+            
+            # Get batch output directory to check for exit_status.log
+            batch_output_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
+            if os.path.exists(batch_output_dir):
+                status = self.get_job_status(job_id, batch_output_dir)
+            
+            # Update or add entry
+            if batch_id_str in job_data:
+                job_data[batch_id_str][1] = job_id
+                job_data[batch_id_str][2] = status
+                # Update completion time if job is completed
+                if status in ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'UNKNOWN'] and not job_data[batch_id_str][4]:
+                    job_data[batch_id_str][4] = self._format_datetime(time.time())
+            else:
+                # Format the submission time as a readable date-time string
+                current_time = time.time()
+                formatted_time = self._format_datetime(current_time)
+                job_data[batch_id_str] = [batch_id_str, job_id, status, formatted_time, '']
+        else:
+            # Update all jobs in the batch_job_map
+            for job_id, batch_id in self.batch_job_map.items():
+                batch_id_str = str(batch_id)
+                
+                # Get batch output directory to check for exit_status.log
+                batch_output_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
+                status = self.get_job_status(job_id, batch_output_dir if os.path.exists(batch_output_dir) else None)
+                
+                # Update or add entry
+                if batch_id_str in job_data:
+                    job_data[batch_id_str][1] = job_id
+                    job_data[batch_id_str][2] = status
+                    # Update completion time if job is completed and no completion time is set
+                    if status in ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'UNKNOWN'] and not job_data[batch_id_str][4]:
+                        job_data[batch_id_str][4] = self._format_datetime(time.time())
+                else:
+                    # Format the submission time as a readable date-time string
+                    current_time = time.time()
+                    formatted_time = self._format_datetime(current_time)
+                    job_data[batch_id_str] = [batch_id_str, job_id, status, formatted_time, '']
+        
+        # Write updated data back to CSV
+        with open(csv_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            # Write header
+            writer.writerow(['batch_id', 'job_id', 'status', 'submission_time', 'completion_time'])
+            # Write data
+            for row in job_data.values():
+                writer.writerow(row)
+    
+    def refresh_all_job_statuses(self):
+        """
+        Refresh the status of all jobs in the batch_job_map and update the CSV file.
+        This is useful for periodic status updates.
+        """
+        # Load latest batch-job mappings
+        self._load_batch_job_map()
+        
+        # Update the CSV with fresh status information
+        self.update_job_status_csv()
+        
+        # Return a dict of batch_id -> status for monitoring
+        statuses = {}
+        csv_file = os.path.join(self.output_path, 'job_status.csv')
+        
+        if os.path.exists(csv_file):
+            import csv
+            with open(csv_file, 'r') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if len(row) >= 3:
+                        batch_id = row[0]
+                        status = row[2]
+                        statuses[batch_id] = status
+        
+        return statuses
+
+    def monitor_jobs(self, update_interval: int = 60, max_updates: int = -1):
+        """
+        Monitor jobs and update the job_status.csv file periodically.
+        
+        Args:
+            update_interval: Number of seconds between updates (default: 60)
+            max_updates: Maximum number of updates (-1 for unlimited)
+        """
+        import time
+        import pandas as pd
+        
+        updates = 0
+        try:
+            while max_updates == -1 or updates < max_updates:
+                print(f"Updating job statuses... (update #{updates+1})")
+                statuses = self.refresh_all_job_statuses()
+                
+                # Print current statuses with improved formatting
+                csv_file = os.path.join(self.output_path, 'job_status.csv')
+                if os.path.exists(csv_file):
+                    try:
+                        df = pd.read_csv(csv_file)
+                        if not df.empty:
+                            print(f"\nCurrently tracked jobs: {len(df)}")
+                            
+                            # Get status counts
+                            status_counts = df['status'].value_counts().to_dict()
+                            pending = status_counts.get('PENDING', 0)
+                            running = status_counts.get('RUNNING', 0)
+                            completed = status_counts.get('COMPLETED', 0)
+                            failed = status_counts.get('FAILED', 0)
+                            
+                            print(f"  PENDING: {pending}, RUNNING: {running}, COMPLETED: {completed}, FAILED: {failed}")
+                            
+                            # Print details of running and pending jobs
+                            active_jobs = df[df['status'].isin(['RUNNING', 'PENDING'])]
+                            if not active_jobs.empty:
+                                print("\nActive jobs:")
+                                for _, job in active_jobs.iterrows():
+                                    submission_time = job['submission_time']
+                                    print(f"  - Batch {job['batch_id']}: Job ID {job['job_id']} ({job['status']}, submitted: {submission_time})")
+                    except Exception as e:
+                        print(f"Error reading job status CSV: {e}")
+                
+                updates += 1
+                if max_updates == -1 or updates < max_updates:
+                    print(f"\nNext update in {update_interval} seconds...")
+                    time.sleep(update_interval)
+        except KeyboardInterrupt:
+            print("\nJob monitoring stopped by user.")
+            return
+
+    def get_queue_jobs(self) -> Set[str]:
+        """
+        Get a set of all job IDs currently in the scheduler queue
+
+        Returns:
+            A set of job ID strings currently in the queue
+        """
+        queue_jobs = set()
+        
+        # Logic depends on scheduler type
+        scheduler_type = self.config.get("scheduler", {}).get("type", "slurm").lower()
+        
+        try:
+            if scheduler_type == "slurm":
+                # Get all jobs from squeue
+                result = subprocess.run(['squeue', '-h', '-o', '%i'], 
+                                      stdout=subprocess.PIPE, 
+                                      stderr=subprocess.PIPE,
+                                      universal_newlines=True)
+                if result.returncode == 0:
+                    for line in result.stdout.strip().split('\n'):
+                        if line.strip():
+                            queue_jobs.add(line.strip())
+                
+            elif scheduler_type == "pbs" or scheduler_type == "torque":
+                # Get all jobs from qstat
+                result = subprocess.run(['qstat', '-f'], 
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       universal_newlines=True)
+                if result.returncode == 0:
+                    # Parse PBS/Torque qstat output to extract job IDs
+                    job_id_pattern = r'Job Id:\s*(\d+)'
+                    matches = re.finditer(job_id_pattern, result.stdout)
+                    for match in matches:
+                        queue_jobs.add(match.group(1))
+            
+            elif scheduler_type == "lsf":
+                # Get all jobs from bjobs
+                result = subprocess.run(['bjobs', '-noheader', '-o', 'JOBID'],
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE,
+                                      universal_newlines=True)
+                if result.returncode == 0:
+                    for line in result.stdout.strip().split('\n'):
+                        if line.strip():
+                            queue_jobs.add(line.strip())
+            
+            else:
+                print(f"Warning: Unsupported scheduler type '{scheduler_type}' for queue check")
+                
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            print(f"Error checking queue: {e}")
+            
+        return queue_jobs
