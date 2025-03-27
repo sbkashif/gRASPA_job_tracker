@@ -95,6 +95,22 @@ The package supports multiple strategies for splitting your database into batche
 
 See the example configuration file in `examples/config.yaml` for details on available options.
 
+## Job tracking
+```csv
+(graspa) [sbinkashif@dt-login01 coremof_clean]$ cat job_status.csv 
+batch_id,job_id,status,submission_time,completion_time
+401,8605663,COMPLETED,2025-03-27 12:11:03,2025-03-27 19:30:30
+402,8605664,COMPLETED,2025-03-27 12:11:03,2025-03-27 19:30:30
+..
+421,8609242,RUNNING,2025-03-27 19:30:30,
+422,8609243,RUNNING,2025-03-27 19:30:30,
+423,8609244,RUNNING,2025-03-27 19:30:30,
+...
+448,8609270,PENDING,2025-03-27 19:30:36,
+449,8609271,PENDING,2025-03-27 19:30:37,
+450,8609272,PENDING,2025-03-27 19:30:37,
+```
+
 ## Requirements
 
 - Python 3.6+
