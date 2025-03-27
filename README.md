@@ -4,12 +4,43 @@ A Python package for automating SLURM job submissions for GRASPA simulations wit
 
 ## Features
 
-- Divide CIF files into batches for parallel processing
+- Divide CIF files into batches for parallel processing using configurable strategies
+- Download and prepare databases automatically with wget
 - Submit SLURM jobs to process each batch with automatic job management
-- Two-step workflow: generate partial charges, then run GRASPA simulations
+- Customaziable workflow by specifying paths to scripts
+- Tested on a three-step workflow: generate partial charges, run GRASPA simulations, and analyze results
 - Track job completion and submit new jobs as previous ones finish
-- Handle failed jobs and resubmit them
-- Configurable via a YAML configuration file
+- [Optional] Resubmit them
+- Configurable runs via a YAML configuration file
+
+## Directory Structure
+
+```
+gRASPA_job_tracker/
+├── graspa_job_tracker/     # Python package
+│   ├── __init__.py
+│   ├── cli.py              # Command-line interface
+│   ├── configuration.py    # Configuration handling
+│   ├── database.py         # Database management
+│   ├── job.py              # Job submission logic
+│   ├── main.py             # Main program execution
+│   ├── batch_splitter.py   # Batch splitting functionality
+│   └── utils.py            # Utility functions
+├── examples/               # Example files
+│   ├── config.yaml         # Example configuration
+│   └── data/               # Example data
+│       ├── raw/            # Original database files
+│       └── processed/      # Processed results
+│           ├── batch_001/
+│           └── ...
+├── forcefields/            # forcefield files
+│   └── forcefiled_1_dir/
+│   ├── forcefiled_2_dir/
+├── templates/              # templates for the job submission
+│   ├── simulation.input    # grapsa simulation input file
+│   ├── slurm_template.sh   # slurm job submission template
+| ...
+```
 
 ## Installation
 
@@ -23,7 +54,7 @@ conda create -n graspa_job_tracker python=3.9
 conda activate graspa_job_tracker
 
 # Install dependencies
-pip install -r requirements.txt
+<TBA -- PACMOF2>
 
 # Install the package
 pip install -e .
@@ -41,14 +72,24 @@ graspa_job_tracker --create-default-config my_config.yaml
 ```
 
 2. Edit the configuration file with your specific settings:
-   - Set the database path containing CIF files
+   - Configure database source (local path or URL for download)
+   - Set batch splitting strategy (alphabetical, size-based, etc.)
    - Configure your SLURM account settings
-   - Specify paths to your partial charge and simulation scripts
+   - Specify paths to your partial charge, simulation, and analysis scripts
 
 3. Run the job tracker:
 ```bash
 graspa_job_tracker --config my_config.yaml
 ```
+
+## Batch Splitting Strategies
+
+The package supports multiple strategies for splitting your database into batches:
+
+- **Alphabetical**: Split files based on alphabetical ordering
+- **Size-based**: Group files based on their size using configurable thresholds
+- **Random**: Randomly assign files to batches
+- **custom_alphabetical**: One-time batch splitting based on alphabetical ordering done gRASPA_job_tracker.script.generate_batches earlier. This was done so that remaining batches can be run in this version of the code without needing to re-run all the batches.
 
 ## Configuration Options
 
@@ -60,3 +101,4 @@ See the example configuration file in `examples/config.yaml` for details on avai
 - SLURM workload manager
 - PyYAML
 - pandas
+- wget (for downloading databases)
