@@ -32,12 +32,8 @@ ENV/
 *.swp
 *.swo
 
-# Job files and output
-job_logs/
-job_scripts/
-batches/
-failed_batches.txt
-job_status.csv
+# All files in examples/data directory recursively
+examples/data/**
 
 # OS specific
 .DS_Store
