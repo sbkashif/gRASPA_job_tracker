@@ -31,7 +31,10 @@ class JobTracker:
         self.output_path = config['output']['output_dir']
         self.results_dir = config['output']['results_dir']
         
-        self.max_concurrent_jobs = config['batch'].get('max_concurrent_jobs', 5)
+        self.max_concurrent_jobs = config['batch'].get('max_concurrent_jobs', 1)
+        
+        # Control whether failed jobs should be resubmitted
+        self.resubmit_failed = config['batch'].get('resubmit_failed', False)
         
         # Initialize batch manager and job scheduler
         self.batch_manager = BatchManager(config)
@@ -50,13 +53,21 @@ class JobTracker:
     def _initialize_job_status(self):
         """Initialize or load job status tracking"""
         if os.path.exists(self.job_status_file):
-            self.job_status = pd.read_csv(self.job_status_file)
+            self.job_status = pd.read_csv(self.job_status_file,
+                                          parse_dates=['submission_time', 'completion_time'])
         else:
             self.job_status = pd.DataFrame(columns=[
                 'batch_id', 'job_id', 'status', 'submission_time', 'completion_time'
             ])
             self.job_status.to_csv(self.job_status_file, index=False)
-        
+            # Explicitly set the types
+            self.job_status = self.job_status.astype({
+                'batch_id': int,
+                'job_id': int,
+                'status': str,
+                'submission_time': 'datetime64[ns]',
+                'completion_time': 'datetime64[ns]'
+            })
         # Initialize failed batches list
         if os.path.exists(self.failed_batches_file):
             with open(self.failed_batches_file, 'r') as f:
@@ -66,9 +77,41 @@ class JobTracker:
             with open(self.failed_batches_file, 'w') as f:
                 pass
     
-    def _save_job_status(self):
+    def _save_job_status_basic(self):
         """Save current job status to file"""
         self.job_status.to_csv(self.job_status_file, index=False)
+        
+    def _save_job_status(self, retries=3):
+        """Save current job status to file with file locking to prevent conflicts"""
+        import fcntl
+        
+        # Create a lock file
+        lock_file = f"{self.job_status_file}.lock"
+        
+        try:
+            with open(lock_file, 'w') as lock:
+                # Non-blocking exclusive lock
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                
+                # Save the DataFrame to CSV
+                self.job_status.to_csv(self.job_status_file, index=False)
+                
+                # Release the lock
+                fcntl.flock(lock, fcntl.LOCK_UN)
+        except IOError:
+            # Another process is updating the file, wait a bit and try again
+            if retries > 0:
+                time.sleep(0.5)
+                self._save_job_status(retries-1)  # Recursive retry with decremented counter
+            else:
+                print("Failed to acquire lock for job status file. Skipping save.")
+        finally:
+            # Remove the lock file if it exists
+            if os.path.exists(lock_file):
+                try:
+                    os.remove(lock_file)
+                except:
+                    pass
     
     def _save_failed_batches(self):
         """Save failed batches to file"""
@@ -76,9 +119,24 @@ class JobTracker:
             for batch_id in self.failed_batches:
                 f.write(f"{batch_id}\n")
     
+    # Add a method to set resubmission behavior
+    def set_resubmit_failed(self, resubmit: bool):
+        """
+        Set whether failed jobs should be resubmitted
+        
+        Args:
+            resubmit: If True, failed jobs will be resubmitted
+        """
+        self.resubmit_failed = resubmit
+        print(f"Resubmit failed jobs set to: {'Yes' if self.resubmit_failed else 'No'}")
+    
     def _get_running_jobs(self) -> Set[str]:
         """Get the set of currently running or pending job IDs and update status of completed jobs"""
         running_jobs = set()
+        status_changes = False
+        
+        # Get all jobs currently in the scheduler queue (from system)
+        queue_jobs = self.job_scheduler.get_queue_jobs()
         
         # Filter for jobs with status 'RUNNING' or 'PENDING'
         active_jobs = self.job_status[self.job_status['status'].isin(['RUNNING', 'PENDING'])]
@@ -86,67 +144,133 @@ class JobTracker:
         for _, job in active_jobs.iterrows():
             job_id = str(job['job_id'])  # Ensure job_id is a string
             batch_id = job['batch_id']   # Get batch_id directly from the current job row
+            current_status = job['status']  # Get current status to detect changes
             
             # Skip "dry-run" job IDs
             if job_id == "dry-run":
-                continue
+                mask = self.job_status['job_id'] == "dry-run"
+            else:
+                mask = self.job_status['job_id'] == int(job_id)
                 
             # Get the batch_output_dir for this job
             batch_output_dir = os.path.join(self.results_dir, f'batch_{batch_id}')
             
-            # Pass batch_output_dir for more accurate status checking
-            status = self.job_scheduler.get_job_status(job_id, batch_output_dir)
+            # Check if job is still in the queue
+            if job_id != "dry-run" and job_id not in queue_jobs:
+                # Job is no longer in queue, check exit status file to determine if it succeeded
+                exit_status_file = os.path.join(batch_output_dir, 'exit_status.log')
+                
+                if os.path.exists(exit_status_file):
+                    with open(exit_status_file, 'r') as f:
+                        exit_status = f.read().strip()
+                        if exit_status == '0':
+                            new_status = 'COMPLETED'
+                            print(f"✅ Job {job_id} for batch {batch_id} completed successfully")
+                        else:
+                            new_status = 'FAILED'
+                            self.failed_batches.add(int(batch_id))
+                            print(f"⚠️ Job {job_id} for batch {batch_id} failed with exit status {exit_status}")
+                else:
+                    # No exit status file but job is not in queue - likely failed
+                    new_status = 'FAILED'
+                    self.failed_batches.add(int(batch_id))
+                    print(f"⚠️ Job {job_id} for batch {batch_id} is not in queue and no exit status file found")
+            else:
+                # Job might still be in queue, use scheduler's status check
+                new_status = self.job_scheduler.get_job_status(job_id, batch_output_dir)
             
-            if status in ['RUNNING', 'PENDING']:
+            # Update status if changed
+            if any(mask):  # Verify there are rows that match this job_id
+                if current_status != new_status:  # Status has changed
+                    self.job_status.loc[mask, 'status'] = new_status
+                    
+                    # Explicitly highlight status transitions with better messages
+                    if current_status == 'PENDING' and new_status == 'RUNNING':
+                        print(f"📊 Job {job_id} for batch {batch_id} is now running")
+                    elif new_status == 'COMPLETED':
+                        print(f"✅ Job {job_id} for batch {batch_id} completed successfully")
+                    elif new_status == 'FAILED':
+                        print(f"❌ Job {job_id} for batch {batch_id} failed")
+                    else:
+                        print(f"Job {job_id} status changed: {current_status} → {new_status}")
+                    
+                    # Track that we had status changes to ensure we save the file
+                    status_changes = True
+                else:
+                    # Status hasn't changed, just log current status (less verbose)
+                    if current_status == 'RUNNING':
+                        print(f"Job {job_id} for batch {batch_id}: {new_status}")
+                    else:
+                        print(f"Job {job_id} status: {new_status}")
+            
+            # Add to running jobs set if still active
+            if new_status in ['RUNNING', 'PENDING']:
                 running_jobs.add(job_id)
             else:
-                # Update job status if it's no longer running or pending
-                mask = self.job_status['job_id'] == job_id
-                if any(mask):  # Verify there are rows that match this job_id
-                    self.job_status.loc[mask, 'status'] = status
+                # Job is no longer running, update completion time    
+                if new_status in ['COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'UNKNOWN']:
+                    # Format timestamp as readable date-time
+                    completion_time = pd.Timestamp(time.time(), unit='s')
+                    self.job_status.loc[mask, 'completion_time'] = completion_time
+                    status_changes = True
                     
-                    if status in ['COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'UNKNOWN']:
-                        # Format timestamp as readable date-time
-                        completion_time = self.job_scheduler._format_datetime(time.time())
-                        self.job_status.loc[mask, 'completion_time'] = completion_time
-                        
-                        # Check exit status file to determine if job succeeded
-                        exit_status_file = os.path.join(self.results_dir, f'batch_{batch_id}', 'exit_status.log')
-                        
-                        if os.path.exists(exit_status_file):
-                            with open(exit_status_file, 'r') as f:
-                                exit_status = f.read().strip()
-                                if exit_status != '0':
-                                    self.failed_batches.add(int(batch_id))
-                                    print(f"⚠️ Batch {batch_id} failed with exit status {exit_status}")
-                        else:
-                            # No exit status file means the job failed
-                            self.failed_batches.add(int(batch_id))
-                            print(f"⚠️ Batch {batch_id} failed - no exit status file found")
-        
-        self._save_job_status()
-        self._save_failed_batches()
+                    # Double-check exit status file to verify job completion status
+                    exit_status_file = os.path.join(self.results_dir, f'batch_{batch_id}', 'exit_status.log')
+                    
+                    if os.path.exists(exit_status_file):
+                        with open(exit_status_file, 'r') as f:
+                            exit_status = f.read().strip()
+                            if exit_status != '0':
+                                self.failed_batches.add(int(batch_id))
+                                if new_status != 'FAILED':
+                                    print(f"⚠️ Updating status: Batch {batch_id} failed with exit code {exit_status}")
+                                    self.job_status.loc[mask, 'status'] = 'FAILED'
+                    elif new_status not in ['CANCELLED']:
+                        # No exit status file and not cancelled means the job failed
+                        self.failed_batches.add(int(batch_id))
+                        if new_status != 'FAILED':
+                            print(f"⚠️ Updating status: Batch {batch_id} failed - no exit status file")
+                            self.job_status.loc[mask, 'status'] = 'FAILED'
+                else:
+                    print(f"⚠️ Unknown status for job {job_id}: {new_status}")
+                    completion_time = pd.Timestamp(time.time(), unit='s')
+                    self.job_status.loc[mask, 'completion_time'] = completion_time
+                    status_changes = True
+                    
+        # Final save of job status after processing all jobs
+        if status_changes:
+            print("Job status changes detected - updating CSV file")
+            self._save_job_status()
+            self._save_failed_batches()
         
         return running_jobs
     
     def _get_next_batch_id(self) -> int:
         """Get the next batch ID to process"""
-        # First, try to process any failed batches
-        if self.failed_batches:
+        # Get all batch IDs that are currently being processed (any status)
+        in_progress_batch_ids = set(self.job_status['batch_id'])
+        
+        # First, try to process any failed batches if resubmission is enabled
+        if self.resubmit_failed and self.failed_batches:
             # Filter failed batches by the specified range if applicable
             if self.batch_range:
                 min_batch, max_batch = self.batch_range
                 filtered_failed_batches = [b for b in self.failed_batches if 
                                           (min_batch is None or b >= min_batch) and 
                                           (max_batch is None or b <= max_batch)]
-                if filtered_failed_batches:
-                    return min(filtered_failed_batches)
+                
+                # Only consider failed batches that aren't currently in progress
+                available_failed_batches = [b for b in filtered_failed_batches if b not in in_progress_batch_ids]
+                
+                if available_failed_batches:
+                    return min(available_failed_batches)
             else:
-                return min(self.failed_batches)
+                # Only consider failed batches that aren't currently in progress
+                available_failed_batches = [b for b in self.failed_batches if b not in in_progress_batch_ids]
+                if available_failed_batches:
+                    return min(available_failed_batches)
         
-        # Then, find the next batch that hasn't been processed
-        processed_batch_ids = set(self.job_status['batch_id'])
-        
+        # Then, find the next batch that hasn't been processed or isn't in progress
         total_batches = self.batch_manager.get_num_batches()
         for batch_id in range(1, total_batches + 1):
             # Skip if batch is outside the specified range
@@ -156,10 +280,11 @@ class JobTracker:
                    (max_batch is not None and batch_id > max_batch):
                     continue
                     
-            if batch_id not in processed_batch_ids:
+            # Check if this batch is already being processed
+            if batch_id not in in_progress_batch_ids:
                 return batch_id
         
-        # If all batches have been processed, return -1
+        # If all batches have been processed or are in progress, return -1
         return -1
     
     def prepare_environment(self) -> bool:
@@ -210,10 +335,9 @@ class JobTracker:
             if not batches:
                 print("⚠️ No batches were created. Please check database path and files.")
                 return False
-                
+            
             print(f"✓ Created {len(batches)} batches")
-        
-        return True
+            return True
     
     def _ensure_database(self) -> bool:
         """
@@ -226,9 +350,9 @@ class JobTracker:
         if 'path' not in self.config['database']:
             print("No database path configured. Skipping database download.")
             return True
-            
+        
         db_path = self.config['database']['path']
-       
+        
         # If database exists and has content, we're good
         if os.path.exists(db_path):
             # For directories, check if they have CIF files
@@ -278,10 +402,10 @@ class JobTracker:
             if not cif_files:
                 print("⚠️ WARNING: Downloaded database contains no CIF files")
                 return False
-                
+            
             print(f"✓ Database download and setup complete. Contains {len(cif_files)} CIF files.")
             return True
-            
+                
         except Exception as e:
             print(f"⚠️ Failed to download or extract database: {e}")
             return False
@@ -336,7 +460,6 @@ class JobTracker:
                 import zipfile
                 with zipfile.ZipFile(archive_path, 'r') as zip_ref:
                     zip_ref.extractall(extract_path)
-        
         elif archive_path.endswith(('.tar.gz', '.tgz')):
             try:
                 # Try using tar command first
@@ -346,7 +469,6 @@ class JobTracker:
                 import tarfile
                 with tarfile.open(archive_path, 'r:gz') as tar_ref:
                     tar_ref.extractall(extract_path)
-        
         elif archive_path.endswith('.tar'):
             try:
                 subprocess.run(['tar', '-xf', archive_path, '-C', extract_path], check=True)
@@ -378,6 +500,14 @@ class JobTracker:
         if next_batch_id == -1:
             # No more batches to process
             return False
+            
+        # Double check that this batch isn't already in progress (just to be safe)
+        batch_jobs = self.job_status[self.job_status['batch_id'] == next_batch_id]
+        if not batch_jobs.empty:
+            active_jobs = batch_jobs[batch_jobs['status'].isin(['PENDING', 'RUNNING'])]
+            if not active_jobs.empty:
+                print(f"⚠️ Batch {next_batch_id} already has active jobs. Skipping to prevent duplicates.")
+                return False
         
         # Get the files for the batch
         try:
@@ -417,9 +547,9 @@ class JobTracker:
             # Update job status
             new_row = {
                 'batch_id': int(next_batch_id),
-                'job_id': str(job_id),
+                'job_id': int(job_id) if job_id != "dry-run" else "dry-run",
                 'status': 'PENDING' if job_id != "dry-run" else "DRY-RUN",
-                'submission_time': self.job_scheduler._format_datetime(time.time()),
+                'submission_time': pd.Timestamp(time.time(), unit='s'),
                 'completion_time': None
             }
             # Create a new DataFrame with the same dtypes as self.job_status
@@ -438,18 +568,74 @@ class JobTracker:
             print(f"⚠️ Failed to submit job for batch {next_batch_id}")
             return False
     
-    def run(self, polling_interval: int = 60, dry_run: bool = False):
+    def clean_job_status(self):
+        """
+        Clean up job status file by removing duplicate submissions and fixing inconsistencies
+        
+        Returns:
+            Number of issues fixed
+        """
+        print("\n=== Cleaning Job Status File ===")
+        if self.job_status.empty:
+            print("Job status file is empty. Nothing to clean.")
+            return 0
+            
+        original_count = len(self.job_status)
+        issues_fixed = 0
+        
+        # Identify batches with multiple active jobs
+        batch_groups = self.job_status.groupby('batch_id')
+        problematic_batches = []
+        
+        for batch_id, group in batch_groups:
+            active_jobs = group[group['status'].isin(['PENDING', 'RUNNING'])]
+            if len(active_jobs) > 1:
+                problematic_batches.append((batch_id, len(active_jobs)))
+                
+                # Keep only the most recent job submission for this batch
+                # Sort by submission_time (most recent first)
+                sorted_jobs = active_jobs.sort_values('submission_time', ascending=False)
+                
+                # Mark all but the most recent job as 'CANCELLED'
+                for idx in sorted_jobs.index[1:]:
+                    self.job_status.loc[idx, 'status'] = 'CANCELLED'
+                    self.job_status.loc[idx, 'completion_time'] = pd.Timestamp(time.time(), unit='s')
+                    issues_fixed += 1
+        
+        if problematic_batches:
+            print(f"Found {len(problematic_batches)} batches with multiple active jobs:")
+            for batch_id, count in problematic_batches:
+                print(f"  - Batch {batch_id}: {count} active jobs (keeping only the most recent)")
+            
+            # Save the cleaned job status
+            self._save_job_status()
+            print(f"Fixed {issues_fixed} duplicate job submissions")
+        else:
+            print("✓ No batches with duplicate active jobs found")
+            
+        return issues_fixed
+    
+    def run(self, polling_interval: int = 60, dry_run: bool = False, resubmit_failed: Optional[bool] = None):
         """
         Run the job tracking and submission process
         
         Args:
             polling_interval: Time (in seconds) to wait between status checks
             dry_run: If True, only generate job scripts but don't submit them
+            resubmit_failed: If provided, overrides the current resubmit_failed setting
         """
+        # Allow overriding the resubmit_failed setting
+        if resubmit_failed is not None:
+            self.resubmit_failed = resubmit
+            
         print("=== Starting GRASPA Job Tracker ===")
         print(f"Output path: {self.output_path}")
         print(f"Maximum concurrent jobs: {self.max_concurrent_jobs}")
         print(f"Polling interval: {polling_interval} seconds")
+        print(f"Resubmit failed jobs: {'Yes' if self.resubmit_failed else 'No'}")
+        
+        # Clean up any inconsistencies in the job status file
+        self.clean_job_status()
         
         # Display batch range if specified
         if self.batch_range:
@@ -498,13 +684,28 @@ class JobTracker:
         print("\n=== Starting Job Submission Loop ===")
         try:
             while True:
-                # Get current running jobs
+                # Force a refresh of job status from any external changes
+                try:
+                    if os.path.exists(self.job_status_file):
+                        previous_status = self.job_status.copy()
+                        self.job_status = pd.read_csv(self.job_status_file)
+                        
+                        # Check if any status changed from external updates
+                        if not previous_status.equals(self.job_status):
+                            print("Job status file was updated externally. Refreshed job status.")
+                except Exception as e:
+                    print(f"Warning: Could not refresh job status from file: {e}")
+
+                # Then get current running jobs
                 running_jobs = self._get_running_jobs()
                 if running_jobs:
                     print(f"Currently running jobs: {len(running_jobs)}")
                     for job_id in running_jobs:
                         # Find the batch ID for this job ID safely
-                        job_rows = self.job_status[self.job_status['job_id'] == job_id]
+                        if job_id == "dry-run":
+                            job_rows = self.job_status[self.job_status['job_id'] == "dry-run"]
+                        else:
+                            job_rows = self.job_status[self.job_status['job_id'] == int(job_id)]
                         if not job_rows.empty:
                             batch_id = job_rows['batch_id'].iloc[0]
                             print(f"  - Batch {batch_id}: Job ID {job_id}")
