@@ -130,7 +130,18 @@ class ConfigParser:
     def _ensure_database_directory(self):
         """Create the database directory if it doesn't exist"""
         db_path = self.config['database']['path']
+        
+        # Create the parent directory
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        
+        # Also create the actual database directory if it doesn't exist
+        # This is needed for directory-style database paths ending with '/'
+        os.makedirs(db_path, exist_ok=True)
+        
+        # If database path is a directory and doesn't exist, create it
+        if not os.path.exists(db_path):
+            os.makedirs(db_path, exist_ok=True)
+            print(f"Created empty database directory: {db_path}")
 
     def _create_output_directories(self):
         """Create all necessary output directories"""
