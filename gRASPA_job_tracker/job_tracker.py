@@ -50,6 +50,19 @@ class JobTracker:
         # Initialize or load job status tracking
         self._initialize_job_status()
     
+    def _format_timestamp(self) -> pd.Timestamp:
+        """
+        Create a timestamp without fractional seconds
+        
+        Returns:
+            A pandas Timestamp object with second precision
+        """
+        # Get current time
+        current_time = pd.Timestamp(time.time(), unit='s')
+        # Format to string without microseconds and convert back to timestamp
+        time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+        return pd.Timestamp(time_str)
+    
     def _initialize_job_status(self):
         """Initialize or load job status tracking"""
         if os.path.exists(self.job_status_file):
@@ -209,8 +222,8 @@ class JobTracker:
             else:
                 # Job is no longer running, update completion time    
                 if new_status in ['COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'UNKNOWN']:
-                    # Format timestamp as readable date-time
-                    completion_time = pd.Timestamp(time.time(), unit='s')
+                    # Use formatted timestamp without fractional seconds
+                    completion_time = self._format_timestamp()
                     self.job_status.loc[mask, 'completion_time'] = completion_time
                     status_changes = True
                     
@@ -233,7 +246,8 @@ class JobTracker:
                             self.job_status.loc[mask, 'status'] = 'FAILED'
                 else:
                     print(f"⚠️ Unknown status for job {job_id}: {new_status}")
-                    completion_time = pd.Timestamp(time.time(), unit='s')
+                    # Use formatted timestamp without fractional seconds
+                    completion_time = self._format_timestamp()
                     self.job_status.loc[mask, 'completion_time'] = completion_time
                     status_changes = True
                     
@@ -549,7 +563,7 @@ class JobTracker:
                 'batch_id': int(next_batch_id),
                 'job_id': int(job_id) if job_id != "dry-run" else "dry-run",
                 'status': 'PENDING' if job_id != "dry-run" else "DRY-RUN",
-                'submission_time': pd.Timestamp(time.time(), unit='s'),
+                'submission_time': self._format_timestamp(),
                 'completion_time': None
             }
             # Create a new DataFrame with the same dtypes as self.job_status
@@ -599,7 +613,8 @@ class JobTracker:
                 # Mark all but the most recent job as 'CANCELLED'
                 for idx in sorted_jobs.index[1:]:
                     self.job_status.loc[idx, 'status'] = 'CANCELLED'
-                    self.job_status.loc[idx, 'completion_time'] = pd.Timestamp(time.time(), unit='s')
+                    # Use formatted timestamp without fractional seconds
+                    self.job_status.loc[idx, 'completion_time'] = self._format_timestamp()
                     issues_fixed += 1
         
         if problematic_batches:
