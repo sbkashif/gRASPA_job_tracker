@@ -246,7 +246,7 @@ class JobScheduler:
         return script_content
     
     def _generate_workflow_steps(self, batch_id: int, output_dir: str, file_list: str) -> str:
-        """Generate workflow steps with exit status logging."""
+        """Generate workflow steps with exit status logging, completion checks, and rerun capabilities."""
         steps_content = ""
         
         # Check if a workflow is defined in the config
@@ -265,8 +265,117 @@ class JobScheduler:
                         'required': True  # All steps are required by default
                     })
         
+        # Build dependency map for sequential workflow - each step depends on the previous one
+        for i in range(1, len(workflow)):
+            if 'depends_on' not in workflow[i]:
+                workflow[i]['depends_on'] = []
+            
+            # If dependencies aren't explicitly defined, assume sequential dependency
+            if not workflow[i]['depends_on']:
+                workflow[i]['depends_on'].append(workflow[i-1]['name'])
+        
         # Track the previous step's output directory to use as input for the next step
         prev_step_output_dir = None
+        
+        # Add step completion check function
+        steps_content += """
+# Function to check if a step is already completed
+check_step_completion() {
+    local step_name="$1"
+    local step_dir="$2"
+    
+    # Check if exit_status.log exists and contains a successful exit code
+    if [ -f "${step_dir}/exit_status.log" ]; then
+        local exit_status=$(cat "${step_dir}/exit_status.log")
+        if [ "$exit_status" = "0" ]; then
+            echo "✅ Step '${step_name}' was previously completed successfully. Skipping."
+            return 0  # Step completed successfully
+        else
+            echo "⚠️  Step '${step_name}' was previously attempted but failed (exit code: ${exit_status}). Will retry."
+            return 1  # Step failed
+        fi
+    elif [ -d "${step_dir}" ] && [ "$(ls -A ${step_dir} 2>/dev/null)" ]; then
+        # Directory exists with content but no status file - likely interrupted
+        echo "🔄 Step '${step_name}' appears to have been interrupted. Will retry."
+        return 2  # Step incomplete
+    fi
+    
+    # No completion status found, directory empty or doesn't exist
+    echo "🆕 Starting step '${step_name}' for the first time."
+    return 3  # Step not started
+}
+
+# Function to check if dependencies are satisfied
+check_dependencies() {
+    local step_name="$1"
+    local dependencies=("${@:2}")
+    
+    # If no dependencies, return success
+    if [ ${#dependencies[@]} -eq 0 ]; then
+        return 0
+    fi
+    
+    echo "🔍 Checking dependencies for step '${step_name}': ${dependencies[*]}"
+    
+    # Check each dependency
+    for dep in "${dependencies[@]}"; do
+        local dep_dir="${output_dir}/${dep}"
+        
+        # Check if this dependency is explicitly defined in our workflow
+        if ! [[ "${workflow_steps_str}" =~ "${dep}" ]]; then
+            echo "⚠️  Dependency '${dep}' is not defined in the workflow - potential configuration issue"
+            # We'll treat this as a warning, not an error, since it might be an optional external dependency
+            continue
+        fi
+        
+        # Check if directory exists
+        if [ ! -d "${dep_dir}" ]; then
+            echo "❌ Dependency directory '${dep}' does not exist - required workflow step is missing"
+            return 1
+        fi
+        
+        # Check if dependency status file exists and contains successful exit code
+        local dep_status_file="${dep_dir}/exit_status.log"
+        if [ ! -f "${dep_status_file}" ]; then
+            echo "❌ Dependency '${dep}' for step '${step_name}' has not been completed"
+            return 1
+        fi
+        
+        local dep_status=$(cat "${dep_status_file}")
+        if [ "${dep_status}" != "0" ]; then
+            echo "❌ Dependency '${dep}' for step '${step_name}' failed with status ${dep_status}"
+            return 1
+        fi
+    done
+    
+    echo "✅ All dependencies satisfied for step '${step_name}'"
+    return 0
+}
+
+# Function to log step status with timestamp
+log_step_status() {
+    local step_name="$1"
+    local status="$2"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[${timestamp}] ${status}: ${step_name}"
+}
+
+"""
+        
+        # Create an array of step names for dependency checking
+        step_names = [step.get('name') for step in workflow]
+        steps_content += f"# All workflow steps for dependency checking\n"
+        steps_content += f"workflow_steps_str=\"{' '.join(step_names)}\"\n\n"
+        
+        # Create a dictionary for step name to directory lookup
+        steps_content += "# Create a mapping of step names to directories\n"
+        steps_content += "declare -A step_directories\n"
+        for step in workflow:
+            step_name = step.get('name')
+            output_subdir = step.get('output_subdir', step_name)
+            steps_content += f'step_directories["{step_name}"]="${output_dir}/{output_subdir}"\n'
+        
+        steps_content += "\n"
         
         # Process each workflow step in sequence
         for i, step in enumerate(workflow):
@@ -274,6 +383,7 @@ class JobScheduler:
             script_path = step.get('script', self.scripts.get(step_name, ''))
             output_subdir = step.get('output_subdir', step_name)
             required = step.get('required', True)
+            dependencies = step.get('depends_on', [])
             
             # Skip if no script is defined for this step
             if not script_path:
@@ -286,8 +396,57 @@ class JobScheduler:
             step_input = file_list if prev_step_output_dir is None else prev_step_output_dir
             
             # Add step header
-            steps_content += f"echo 'Step {i+1}: {step_name.replace('_', ' ').title()}'\n"
+            steps_content += f"\necho '====== Step {i+1}: {step_name.replace('_', ' ').title()} ======'\n"
             steps_content += f"mkdir -p {step_output_dir}\n"
+            
+            # Convert dependencies to an array for bash
+            deps_array = "("
+            for dep in dependencies:
+                deps_array += f'"{dep}" '
+            deps_array += ")"
+            
+            # Add dependency and step completion checks
+            steps_content += f"""
+# Check dependencies for {step_name}
+check_dependencies "{step_name}" {deps_array}
+dependency_check=$?
+
+if [ $dependency_check -ne 0 ]; then
+    if [ "{str(required).lower()}" = "true" ]; then
+        log_step_status "{step_name}" "SKIPPED_DEPENDENCY_FAILED"
+        echo "⛔ Required dependencies for step '{step_name}' have failed. Skipping batch {batch_id}."
+        echo '{batch_id}' >> {os.path.join(self.output_path, 'failed_batches.txt')}
+        exit 1
+    else
+        log_step_status "{step_name}" "SKIPPED_OPTIONAL"
+        echo "⏭️  Skipping optional step '{step_name}' due to failed dependencies."
+        continue
+    fi
+fi
+
+# Check if this step is already completed
+check_step_completion "{step_name}" "{step_output_dir}"
+step_check_status=$?
+
+case $step_check_status in
+    0)
+        # Step already completed successfully, set status to 0 and continue to next step
+        {step_name.lower().replace('-', '_')}_status=0
+        ;;
+    1)
+        # Step previously failed, decide whether to retry
+        if [ "{str(required).lower()}" = "true" ]; then
+            log_step_status "{step_name}" "RETRYING_FAILED_STEP"
+            echo "🔁 Rerunning previously failed step '{step_name}' (required for workflow)"
+            
+            # Backup previous output with timestamp
+            if [ -d "{step_output_dir}" ] && [ "$(ls -A {step_output_dir} 2>/dev/null)" ]; then
+                backup_dir="{step_output_dir}_failed_$(date '+%Y%m%d_%H%M%S')"
+                echo "📦 Backing up previous attempt to $backup_dir"
+                mv {step_output_dir} $backup_dir
+                mkdir -p {step_output_dir}
+            fi
+"""
             
             # Special case: Always treat mps_run as a bash script regardless of extension
             is_bash_script = (script_path.endswith(('.sh', '.bash')) or 
@@ -318,276 +477,98 @@ class JobScheduler:
             
             # Add status check
             step_var_name = f"{step_name.lower().replace('-', '_')}_status"
-            steps_content += f"{step_var_name}=$?\n"
-            steps_content += f"if [ ${step_var_name} -ne 0 ]; then\n"
-            steps_content += f"    echo '{step_name} failed'\n"
             
-            if required:
-                steps_content += f"    echo '{batch_id}' >> {os.path.join(self.output_path, 'failed_batches.txt')}\n"
-                steps_content += "    exit 1\n"
-            else:
-                steps_content += "    # Continue despite failure in this optional step\n"
+            # Continue the case statement
+            steps_content += f"""
+                {step_var_name}=$?
                 
-            steps_content += "fi\n\n"
+                # Log exit status
+                echo ${step_var_name} > {os.path.join(step_output_dir, 'exit_status.log')}
+                
+                if [ ${step_var_name} -ne 0 ]; then
+                    log_step_status "{step_name}" "RETRY_FAILED"
+                    echo "❌ Retry of step '{step_name}' failed again with exit code ${step_var_name}"
+                    echo '{batch_id}' >> {os.path.join(self.output_path, 'failed_batches.txt')}
+                    exit 1
+                else
+                    log_step_status "{step_name}" "RETRY_SUCCEEDED"
+                    echo "✅ Retry of step '{step_name}' succeeded"
+                fi
+            else
+                # Optional step that previously failed, skip it
+                log_step_status "{step_name}" "SKIPPED_OPTIONAL_FAILED"
+                echo "⏭️  Skipping optional step '{step_name}' that previously failed"
+                {step_var_name}=0  # Consider it "passed" for workflow purposes
+            fi
+            ;;
+        2|3)
+            # Step was interrupted or not started, run it
+            log_step_status "{step_name}" "STARTING"
+            echo "🚀 Running step '{step_name}'"
+"""
+            
+            # Add the execution for cases 2 and 3 (interrupted or not started)
+            if is_bash_script:
+                steps_content += self._generate_bash_step(
+                    script_path=script_path,
+                    step_name=step_name,
+                    batch_id=batch_id,
+                    input_file=step_input,
+                    output_dir=step_output_dir,
+                    step=step,
+                    is_first_step=(prev_step_output_dir is None)
+                )
+            else:
+                steps_content += self._generate_python_step(
+                    script_path=script_path,
+                    step_name=step_name,
+                    batch_id=batch_id,
+                    input_file=step_input,
+                    output_dir=step_output_dir,
+                    step=step,
+                    is_first_step=(prev_step_output_dir is None)
+                )
+                
+            steps_content += f"""
+            {step_var_name}=$?
+            
+            # Log exit status
+            echo ${step_var_name} > {os.path.join(step_output_dir, 'exit_status.log')}
+            
+            if [ ${step_var_name} -ne 0 ]; then
+                log_step_status "{step_name}" "FAILED"
+                echo "❌ Step '{step_name}' failed with exit code ${step_var_name}"
+                
+                if [ "{str(required).lower()}" = "true" ]; then
+                    echo '{batch_id}' >> {os.path.join(self.output_path, 'failed_batches.txt')}
+                    exit 1
+                else
+                    log_step_status "{step_name}" "FAILED_BUT_OPTIONAL"
+                    echo "⚠️  Step '{step_name}' failed but is optional, continuing workflow"
+                fi
+            else
+                log_step_status "{step_name}" "SUCCESS"
+                echo "✅ Step '{step_name}' completed successfully"
+            fi
+            ;;
+    esac
+
+"""
             
             # Ensure the script does not exit prematurely after the simulation step
             if step_name == 'simulation':
                 steps_content += f"# Ensure transition to the next step after simulation\n"
-                steps_content += f"echo 'Simulation step completed. Proceeding to analysis...'\n\n"
+                steps_content += f"echo '🔄 Simulation step handled. Proceeding to next step...'\n\n"
             
             # Update the previous step output dir for the next iteration
             prev_step_output_dir = step_output_dir
 
-            steps_content += f"echo $? > {os.path.join(output_dir, step['output_subdir'], 'exit_status.log')}\n"
+        # Add final success indication to exit_status.log in the main output directory
+        steps_content += f"\n# Write final success status to main exit_status.log\n"
+        steps_content += f"echo 0 > {os.path.join(output_dir, 'exit_status.log')}\n"
+        steps_content += f"echo '🎉 All required steps completed successfully for batch {batch_id}'\n"
         
         return steps_content
-    
-    def _generate_bash_step(self, script_path: str, step_name: str, batch_id: int, 
-                           input_file: str, output_dir: str, step: Dict[str, Any],
-                           is_first_step: bool = False) -> str:
-        """Generate bash script execution commands for a workflow step"""
-        content = ""
-        
-        # Copy template if one is specified and exists
-        template_key = f"{step_name}_input_template"
-        template_path = self.templates.get(template_key, '')
-        if template_path and os.path.exists(template_path):
-            content += f"cp {template_path} {output_dir}/{step_name}.input\n"
-        
-        # Handle special case for mps_run which may be a Python module path
-        is_module = not ('/' in script_path or script_path.endswith(('.sh', '.bash', '.py')))
-        
-        # Special handling for scripts that need to run in their output directory
-        if step.get('change_dir', False) or step_name == 'simulation' or 'mps_run' in script_path:
-            # Handle mps_run specially with a direct path
-            if 'mps_run' in script_path:
-                script_basename = "mps_run.sh"
-                
-                # Get the package root directory
-                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                
-                # Construct the direct path to the script
-                scripts_dir = os.path.join(project_root, 'gRASPA_job_tracker', 'scripts')
-                mps_script_path = os.path.join(scripts_dir, script_basename)
-                script_path = mps_script_path
-            else:
-                script_basename = os.path.basename(script_path)
-            
-            local_script = f"{step_name}_{script_basename}"
-            
-            # Change to output directory
-            content += f"# Change to output directory\n"
-            content += f"cd {output_dir}\n"
-            
-            # Copy script locally
-            content += f"cp {script_path} ./{local_script}\n"
-            content += f"chmod +x ./{local_script}\n"
-            script_to_run = f"./{local_script}"
-            
-            # Add template path if applicable
-            template_env_var = ""
-            template_file_path = None
-            # Find the template path and set environment variable
-            if 'run_file_templates' in self.config and 'simulation_input' in self.config['run_file_templates']:
-                template_config = self.config['run_file_templates']['simulation_input']
-                if isinstance(template_config, dict) and 'file_path' in template_config:
-                    template_file_path = template_config['file_path']
-                    template_env_var = "$TEMPLATE_SIMULATION_INPUT"
-                    
-                    # Generate the template file with variable substitution
-                    if template_file_path and os.path.exists(template_file_path) and 'variables' in template_config:
-                        local_template = f"{step_name}_template.input"
-                        content += f"# Copy and modify template with variables\n"
-                        content += f"cp {template_file_path} ./{local_template}\n"
-                        
-                        # Process each variable with a simpler approach
-                        content += f"# Simple variable replacement for template\n"
-                        for var_key, var_value in template_config['variables'].items():
-                            content += f"if grep -q \"^{var_key}\" ./{local_template}; then\n"
-                            content += f"  # Replace existing variable\n"
-                            content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
-                            content += f"else\n"
-                            content += f"  # Add variable if it doesn't exist\n"
-                            content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
-                            content += f"fi\n"
-                        
-                        # Update the template environment variable to point to the modified local template
-                        content += f"export TEMPLATE_SIMULATION_INPUT=\"$(pwd)/{local_template}\"\n"
-            
-            # Execute with batch_id and appropriate arguments
-            content += f"# Execute script locally\n"
-            
-            # Special handling for mps_run - it expects batch_id, input_dir, output_dir, scripts_dir
-            if 'mps_run' in script_path:
-                # For mps_run, input_file is a directory with CIF files if not first step
-                if not is_first_step:
-                    # When input is a directory containing results from previous step
-                    content += f"# Using previous step output directory as input\n"
-                    
-                    # Export template as environment variable instead of argument
-                    if template_env_var and not template_file_path:  # Only if we didn't already set it above
-                        content += f"export TEMPLATE_SIMULATION_INPUT={template_env_var}\n"
-                    
-                    # We're already in the output directory, pass batch_id, input_dir, output_dir, scripts_dir
-                    content += f"bash {script_to_run} {batch_id} {input_file} {scripts_dir} .\n"
-                else:
-                    # For first step or when input_file is a file list
-                    content += f"# First step: setting up input/output directories\n"
-                    # We're already in the output directory, pass batch_id, input_dir, output_dir, scripts_dir
-                    content += f"bash {script_to_run} {batch_id} {input_file} {scripts_dir} .\n"
-                    
-                    # Export template as environment variable instead of argument
-                    if template_env_var and not template_file_path:  # Only if we didn't already set it above
-                        content += f"export TEMPLATE_SIMULATION_INPUT={template_env_var}\n"
-                    
-                    # Also provide input file as an environment variable for mps_run
-                    content += f"export MPS_INPUT_FILE=\"{input_file}\"\n"
-            else:
-                # Regular script execution
-                if template_env_var:
-                    content += f"bash {script_to_run} {batch_id} {input_file} {template_env_var}\n"
-                else:
-                    content += f"bash {script_to_run} {batch_id} {input_file}\n"
-            
-            # Capture exit status and clean up on success
-            content += f"script_status=$?\n"
-            content += f"if [ $script_status -eq 0 ]; then\n"
-            content += f"    # Clean up unnecessary files on success\n"
-            content += f"    rm -f ./{local_script}\n"
-            content += f"fi\n"
-            
-            # Return to original directory and pass through the exit status
-            content += f"cd -\n"
-            
-            # Remove the explicit exit call for mps_run but keep for other scripts
-            # This fixes the premature job termination issue
-            if 'mps_run' in script_path or step_name == 'simulation':
-                # Just use the return command without exit for simulation scripts
-                content += f"# Avoid exit for simulation scripts to prevent premature job termination\n"
-            else:
-                content += f"exit $script_status\n"
-            
-        else:
-            # Regular bash script - run from original location
-            # Get additional arguments if specified
-            args = step.get('args', [input_file, output_dir])
-            
-            # Add template path if applicable
-            template_key = f"{step_name}_input"
-            template_env_var = None
-            if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
-                template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
-                if isinstance(args, list) and template_env_var not in args:
-                    args.append(template_env_var)
-            
-            if isinstance(args, list):
-                args_str = ' '.join([str(arg) for arg in [batch_id] + args])
-            else:
-                args_str = f"{batch_id} {input_file} {output_dir}"
-                if template_env_var:
-                    args_str += f" {template_env_var}"
-                
-            content += f"bash {script_path} {args_str}\n"
-            
-        return content
-    
-    def _generate_python_step(self, script_path: str, step_name: str, batch_id: int, 
-                             input_file: str, output_dir: str, step: Dict[str, Any],
-                             is_first_step: bool = False) -> str:
-        """Generate python script execution commands for a workflow step"""
-        content = ""
-        
-        # Special handling for simulation scripts or those needing to run in output directory
-        if step_name == 'simulation' or step.get('change_dir', False):
-            # Get script basename for local copy if it's a file
-            if '/' in script_path or script_path.endswith('.py'):
-                script_basename = os.path.basename(script_path)
-                local_script = f"{step_name}_{script_basename}"
-                
-                # Change to output directory and copy script locally
-                content += f"# Change to output directory and copy script locally\n"
-                content += f"cd {output_dir}\n"
-                content += f"cp {script_path} ./{local_script}\n"
-                
-                # Get arguments
-                args = step.get('args', [])
-                if not args:
-                    args = [input_file, output_dir]
-                    
-                    # Add template path if applicable
-                    template_key = f"{step_name}_input"
-                    if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
-                        template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
-                        args.append(template_env_var)
-                
-                # Format arguments
-                args_str = ' '.join([str(arg) for arg in [batch_id] + args])
-                
-                # Execute script
-                content += f"# Execute script locally\n"
-                content += f"python ./{local_script} {args_str}\n"
-                
-                # Capture exit status and clean up on success
-                content += f"script_status=$?\n"
-                content += f"if [ $script_status -eq 0]; then\n"
-                content += f"    # Clean up unnecessary files on success\n"
-                content += f"    rm -f ./{local_script}\n"
-                content += f"fi\n"
-                
-                # Return to original directory
-                content += f"cd -\n"
-            else:
-                # It's a module name - run with -m flag in output directory
-                content += f"cd {output_dir}\n"
-                
-                # Get arguments
-                args = step.get('args', [])
-                if not args:
-                    args = [input_file, output_dir]
-                    
-                    # Add template path if applicable
-                    template_key = f"{step_name}_input"
-                    if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
-                        template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
-                        args.append(template_env_var)
-                
-                # Format arguments
-                args_str = ' '.join([str(arg) for arg in [batch_id] + args])
-                
-                # Execute module
-                content += f"python -m {script_path} {args_str}\n"
-                content += f"script_status=$?\n"
-                content += f"cd -\n"
-                
-                # Prevent premature job termination for simulation scripts
-                if step_name == 'simulation':
-                    content += f"# Skip exit for simulation step to prevent premature job termination\n"
-                else:
-                    content += f"exit $script_status\n"
-        else:
-            # Regular Python script/module - run from original location
-            # Get arguments
-            args = step.get('args', [])
-            if not args:
-                args = [input_file, output_dir]
-                
-                # Add template path if applicable
-                template_key = f"{step_name}_input"
-                if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
-                    template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
-                    args.append(template_env_var)
-            
-            # Format arguments
-            args_str = ' '.join([str(arg) for arg in [batch_id] + args])
-            
-            # Generate command based on script path format
-            if '/' in script_path or script_path.endswith('.py'):
-                # It's a file path, run directly
-                content += f"python {script_path} {args_str}\n"
-            else:
-                # It's a module name, use -m flag
-                content += f"python -m {script_path} {args_str}\n"
-        return content
     
     def print_job_script(self, script_path: str) -> None:
         """
