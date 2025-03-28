@@ -584,7 +584,13 @@ class JobTracker:
     
     def clean_job_status(self):
         """
-        Clean up job status file by removing duplicate submissions and fixing inconsistencies
+        Clean up job status file by removing duplicate submissions and fixing inconsistencies.
+        Also cancels duplicate jobs in the SLURM queue to prevent wasted resources.
+        
+        Prioritization strategy for duplicate jobs:
+        1. PENDING jobs are preferred over RUNNING jobs
+        2. For multiple PENDING jobs, keep the oldest submitted
+        3. For multiple RUNNING jobs, keep the latest (newest) submitted
         
         Returns:
             Number of issues fixed
@@ -597,6 +603,9 @@ class JobTracker:
         original_count = len(self.job_status)
         issues_fixed = 0
         
+        # Make sure subprocess is imported
+        import subprocess
+        
         # Identify batches with multiple active jobs
         batch_groups = self.job_status.groupby('batch_id')
         problematic_batches = []
@@ -606,25 +615,51 @@ class JobTracker:
             if len(active_jobs) > 1:
                 problematic_batches.append((batch_id, len(active_jobs)))
                 
-                # Keep only the most recent job submission for this batch
-                # Sort by submission_time (most recent first)
-                sorted_jobs = active_jobs.sort_values('submission_time', ascending=False)
+                # Logic for prioritization:
+                # 1. If PENDING jobs exist, keep the oldest PENDING job
+                # 2. If only RUNNING jobs exist, keep the newest RUNNING job
                 
-                # Mark all but the most recent job as 'CANCELLED'
-                for idx in sorted_jobs.index[1:]:
-                    self.job_status.loc[idx, 'status'] = 'CANCELLED'
-                    # Use formatted timestamp without fractional seconds
-                    self.job_status.loc[idx, 'completion_time'] = self._format_timestamp()
-                    issues_fixed += 1
+                pending_jobs = active_jobs[active_jobs['status'] == 'PENDING']
+                if not pending_jobs.empty:
+                    # PENDING jobs exist - keep oldest PENDING job
+                    sorted_pending = pending_jobs.sort_values('submission_time', ascending=True)
+                    job_to_keep_idx = sorted_pending.index[0]
+                    job_to_keep_id = self.job_status.loc[job_to_keep_idx, 'job_id']
+                    print(f"Batch {batch_id}: Keeping oldest PENDING job {job_to_keep_id}")
+                else:
+                    # Only RUNNING jobs - keep newest RUNNING job
+                    sorted_running = active_jobs.sort_values('submission_time', ascending=False)
+                    job_to_keep_idx = sorted_running.index[0]
+                    job_to_keep_id = self.job_status.loc[job_to_keep_idx, 'job_id']
+                    print(f"Batch {batch_id}: Keeping newest RUNNING job {job_to_keep_id}")
+                
+                # Mark all other jobs as 'CANCELLED' and actually cancel them in SLURM
+                for idx in active_jobs.index:
+                    if idx != job_to_keep_idx:
+                        job_id = str(self.job_status.loc[idx, 'job_id'])
+                        job_status = self.job_status.loc[idx, 'status']
+                        
+                        # Skip "dry-run" job IDs
+                        if job_id != "dry-run":
+                            try:
+                                # Issue scancel command to cancel job
+                                print(f"  Cancelling {job_status} job {job_id} for batch {batch_id}")
+                                subprocess.run(['scancel', job_id], check=False)
+                                issues_fixed += 1
+                            except Exception as e:
+                                print(f"  Failed to cancel job {job_id}: {e}")
+                        
+                        # Update job status in tracking file
+                        self.job_status.loc[idx, 'status'] = 'CANCELLED'
+                        # Use formatted timestamp without fractional seconds
+                        self.job_status.loc[idx, 'completion_time'] = self._format_timestamp()
         
         if problematic_batches:
-            print(f"Found {len(problematic_batches)} batches with multiple active jobs:")
-            for batch_id, count in problematic_batches:
-                print(f"  - Batch {batch_id}: {count} active jobs (keeping only the most recent)")
+            print(f"\nFound {len(problematic_batches)} batches with multiple active jobs")
             
             # Save the cleaned job status
             self._save_job_status()
-            print(f"Fixed {issues_fixed} duplicate job submissions")
+            print(f"Fixed {issues_fixed} duplicate job submissions and cancelled them in the SLURM queue")
         else:
             print("✓ No batches with duplicate active jobs found")
             
@@ -641,9 +676,9 @@ class JobTracker:
         """
         # Allow overriding the resubmit_failed setting
         if resubmit_failed is not None:
-            self.resubmit_failed = resubmit
+            self.resubmit_failed = resubmit_failed
             
-        print("=== Starting GRASPA Job Tracker ===")
+        print("=== Starting gRASPA Job Tracker ===")
         print(f"Output path: {self.output_path}")
         print(f"Maximum concurrent jobs: {self.max_concurrent_jobs}")
         print(f"Polling interval: {polling_interval} seconds")
