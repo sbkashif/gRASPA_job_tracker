@@ -1,23 +1,19 @@
 # gRASPA Job Tracker
 
-A Python package for automating SLURM job submissions for GRASPA simulations with CIF files.
+A Python package for generating large datasets of results from gRASPA simulations. This package is designed to facilitate the automated submission and tracking of multiple gRASPA jobs, and designing customized workflows from preprocessing to simulation to analysis.
 
 ## Features
 
-- Divide CIF files into batches for parallel processing using configurable strategies
-- Download and prepare databases automatically with wget
-- Submit SLURM jobs to process each batch with automatic job management
-- Customaziable workflow by specifying paths to scripts
-- Tested on a three-step workflow: generate partial charges, run GRASPA simulations, and analyze results
-- Track job completion and submit new jobs as previous ones finish
-- [Optional] Resubmit them
 - Configurable runs via a YAML configuration file
+- Divide the database into batches for parallel processing using various strategies
+- Customaziable workflow by specifying paths to scripts. The workflow has been tested on a three-step sequential process: generate partial charges, run gRASPA simulations, and obtain adsorbate loadings.
+- Automated job submission to SLURM, tracking job status, and, optionally, resubmission of failed jobs.
 
 ## Directory Structure
 
 ```
 gRASPA_job_tracker/
-├── graspa_job_tracker/     # Python package
+├── gRaspa_job_tracker/     # Python package
 │   ├── __init__.py
 │   ├── cli.py              # Command-line interface
 │   ├── configuration.py    # Configuration handling
@@ -53,16 +49,13 @@ cd gRASPA_job_tracker
 conda create -n graspa_job_tracker python=3.9
 conda activate graspa_job_tracker
 
-# Install dependencies
-<TBA -- PACMOF2>
+# You will need install following dependencies separately:
+# - gRASPA (https://github.com/snurr-group/gRASPA)
+# - PACMOF2 (https://github.com/snurr-group/pacmof2/)
 
 # Install the package
 pip install -e .
 ```
-
-You would also need to have the `gRASPA` package installed in your environment. You can install it from the following repository: 
-
-`https://github.com/snurr-group/gRASPA`
 
 ## Usage
 
@@ -75,10 +68,11 @@ graspa_job_tracker --create-default-config my_config.yaml
    - Configure database source (local path or URL for download)
    - Set batch splitting strategy (alphabetical, size-based, etc.)
    - Configure your SLURM account settings
-   - Specify paths to your partial charge, simulation, and analysis scripts
+   - Specify paths to your partial charge, simulation, analysis or any intermediate scripts.
 
 3. Run the job tracker:
 ```bash
+graspa_job_tracker --config my_config.yaml --prepare-only
 graspa_job_tracker --config my_config.yaml
 ```
 
