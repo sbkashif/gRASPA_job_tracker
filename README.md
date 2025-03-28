@@ -71,9 +71,18 @@ graspa_job_tracker --create-default-config my_config.yaml
    - Specify paths to your partial charge, simulation, analysis or any intermediate scripts.
 
 3. Run the job tracker:
+
+The recommended way to run the job tracker is in two steps. The first step prepares the batches and checks for any issues before submitting jobs. The second step will submit the jobs. The first step is a one-time operation and you can skip it if you are sure that the batches are already prepared.
+
 ```bash
 graspa_job_tracker --config my_config.yaml --prepare-only
 graspa_job_tracker --config my_config.yaml
+```
+
+You can also constrain the batches to be considered for submission:
+
+```bash
+graspa_job_tracker --config my_config.yaml --min-batch <BATCH_NUMBER> --max-batch <BATCH_NUMBER>
 ```
 
 ## Batch Splitting Strategies
@@ -104,6 +113,26 @@ batch_id,job_id,status,submission_time,completion_time
 449,8609271,PENDING,2025-03-27 19:30:37,
 450,8609272,PENDING,2025-03-27 19:30:37,
 ```
+
+## Command Line Options
+
+...
+
+### Job Status Management
+
+```bash
+# Update job status without submitting new jobs
+python -m gRASPA_job_tracker --update-status
+
+# Update job status for a specific batch range
+python -m gRASPA_job_tracker --update-status --batch-range 100-200
+```
+
+The `--update-status` option scans all batch directories to update the job status tracking file without submitting any new jobs. This is useful for:
+
+- Recovering tracking information after modifying files manually
+- Getting an overview of current job status
+- Updating the status of completed jobs in the background
 
 ## Requirements
 

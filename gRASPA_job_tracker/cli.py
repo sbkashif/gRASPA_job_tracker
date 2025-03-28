@@ -162,7 +162,9 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='Generate job scripts but don\'t submit them')
     parser.add_argument('--min-batch', '-min', type=int, help='Minimum batch ID to process')
     parser.add_argument('--max-batch', '-max', type=int, help='Maximum batch ID to process')
-    parser.add_argument('--resubmit-failed', action='store_true', help='Resubmit failed jobs (default: do not resubmit)') 
+    parser.add_argument('--resubmit-failed', action='store_true', help='Resubmit failed jobs (default: do not resubmit)')
+    parser.add_argument('--update-status', action='store_true',
+                        help='Just scan and update status of all batches without submitting new jobs')
     args = parser.parse_args()
     
     # Show version information
@@ -193,6 +195,42 @@ def main():
             batch_range = (args.min_batch, args.max_batch)
             print(f"Processing batches in range: {args.min_batch or 'START'} to {args.max_batch or 'END'}")
         
+        # Check for update-status mode
+        if args.update_status:
+            print("=== Status Update Mode - Scanning batch status without submitting jobs ===")
+            tracker = JobTracker(config, batch_range=batch_range)
+            
+            try:
+                tracker.clean_job_status()
+                running_jobs = tracker._get_running_jobs()
+                
+                print("\n=== Job Status Update Summary ===")
+                if tracker.job_status.empty:
+                    print("No jobs found in tracking file.")
+                else:
+                    status_counts = tracker.job_status['status'].value_counts().to_dict()
+                    print(f"PENDING:   {status_counts.get('PENDING', 0)}")
+                    print(f"RUNNING:   {status_counts.get('RUNNING', 0)}")
+                    print(f"COMPLETED: {status_counts.get('COMPLETED', 0)}")
+                    print(f"FAILED:    {status_counts.get('FAILED', 0)}")
+                    other = sum(count for status, count in status_counts.items() 
+                              if status not in ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED'])
+                    if other > 0:
+                        print(f"OTHER:     {other}")
+                
+                print(f"\nJob status saved to: {tracker.job_status_file}")
+                if tracker.failed_batches:
+                    print(f"Failed batches saved to: {tracker.failed_batches_file}")
+                    print(f"Total failed batches: {len(tracker.failed_batches)}")
+                    
+                print("✅ Status update completed successfully")
+                
+            except Exception as e:
+                print(f"⚠️ Error updating status: {e}")
+                if os.environ.get("DEBUG"):
+                    traceback.print_exc()
+            return
+        
         # Create and run job tracker early so we can use it for download-only mode
         tracker = JobTracker(config, batch_range=batch_range)
         
@@ -215,21 +253,11 @@ def main():
                         return
                     else:
                         print("⚠️ Database download failed")
-                        # Restore backup if we had one
-                        if os.path.exists(backup_path):
-                            shutil.rmtree(config['database']['path'], ignore_errors=True)
-                            os.rename(backup_path, config['database']['path'])
-                            print("Original database restored")
                         sys.exit(1)
                 except Exception as e:
                     print(f"⚠️ Database download failed with error: {e}")
                     if os.environ.get("DEBUG"):
                         traceback.print_exc()
-                    # Restore backup if we had one
-                    if os.path.exists(backup_path):
-                        shutil.rmtree(config['database']['path'], ignore_errors=True)
-                        os.rename(backup_path, config['database']['path'])
-                        print("Original database restored")
                     sys.exit(1)
             else:
                 print(f"Database already exists at: {config['database']['path']}")
@@ -274,7 +302,7 @@ def main():
         
         # Ask for confirmation before continuing with normal mode
         if not args.no_confirm:
-            prompt = "Continue with job tracker (download database, create batches, and submit jobs)? [Y/n] "
+            prompt = "Continue with job tracker (may include download database if not already done, create batches if not already done, and submit jobs)? [Y/n] "
             if input(prompt).lower() in ['n', 'no']:
                 print("Operation cancelled by user.")
                 return

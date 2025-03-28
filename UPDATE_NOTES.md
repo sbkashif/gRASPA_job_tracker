@@ -1,5 +1,30 @@
 # gRASPA Job Tracker Update Notes
 
+## 2025-03-28: Enhanced Job Duplicate Detection and Cancellation
+
+### Added Features
+
+- **Intelligent Duplicate Job Management**:
+  - Added capability to detect and cancel duplicate SLURM jobs for the same batch
+  - Smart prioritization of jobs based on status and submission time
+  - Automated cleanup of the job queue to prevent resource waste
+
+- **Prioritization Logic**:
+  - PENDING jobs are prioritized over RUNNING jobs
+  - Among multiple PENDING jobs, the oldest submission is kept
+  - Among multiple RUNNING jobs, the newest submission is kept
+  - All other duplicate jobs are automatically cancelled in SLURM
+
+- **Job Status Update Utility**:
+  - Added new command-line option `--update-status` to scan all batches and update job status without submitting new jobs
+  - Provides a comprehensive status summary of all tracked batches
+
+### Technical Implementation Details
+
+- Enhanced `clean_job_status()` function to actively cancel duplicate jobs using SLURM's `scancel` command
+- Implemented intelligence-based job selection to minimize workflow disruption
+- Added detailed logging of duplicate detection and resolution actions
+
 ## 2025-03-28: Step Completion Check and Workflow Dependency System
 
 ### Added Features
