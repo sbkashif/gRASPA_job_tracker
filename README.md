@@ -14,28 +14,56 @@ A Python package for generating large datasets of results from gRASPA simulation
 ```
 gRASPA_job_tracker/
 ├── gRaspa_job_tracker/     # Python package
-│   ├── __init__.py
-│   ├── cli.py              # Command-line interface
-│   ├── configuration.py    # Configuration handling
-│   ├── database.py         # Database management
-│   ├── job.py              # Job submission logic
-│   ├── main.py             # Main program execution
-│   ├── batch_splitter.py   # Batch splitting functionality
-│   └── utils.py            # Utility functions
+|   ├── batch_manager.py
+|   ├── cli.py
+|   ├── config_parser.py
+|   ├── generate_batches.sh
+|   ├── __init__.py
+|   ├── job_scheduler.py
+|   ├── job_tracker.py
+|   ├── scripts
+|   │   ├── 1-copy_cif_files.sh
+|   │   ├── 2-update_unit_cells.sh
+|   │   ├── analyze_batch_output.py
+|   │   ├── cleanup_results.sh
+|   │   ├── generate_partial_charge.py
+|   │   ├── mincell.py
+|   │   ├── mps_run.sh
+|   │   ├── parse_graspa_output.py
+|   │   ├── start_as_root.sh
+|   │   └── stop_as_root.sh
+|   └── utils.py
 ├── examples/               # Example files
 │   ├── config.yaml         # Example configuration
-│   └── data/               # Example data
-│       ├── raw/            # Original database files
-│       └── processed/      # Processed results
-│           ├── batch_001/
-│           └── ...
+│   ├── {PROJECT_NAME}/     # Example data
+│       ├── data/           # Original database files
+│           ├── raw/        # Original database files
+│           ├── batches/    # Processed results
+│           │   ├── batch_1.csv
+│           │   ├── batch_2.csv
+│           │   └── ...
+│           ├── job_logs/
+│           ├── job_status.csv # See the [job tracking](#job-tracking) section
+│           ├── job_scripts/
+│           └── results/
+│               ├── batch_1/
+│               │   ├── partial_charges/
+│               │   ├── simulations/
+│               │   └── analysis/
+│               ├── batch_2/
+│               ├── batch_3/
+│               └── ...
 ├── forcefields/            # forcefield files
 │   └── forcefiled_1_dir/
 │   ├── forcefiled_2_dir/
 ├── templates/              # templates for the job submission
 │   ├── simulation.input    # grapsa simulation input file
-│   ├── slurm_template.sh   # slurm job submission template
-| ...
+│   └── slurm_template.sh   # slurm job submission template
+├── .gitignore
+├── LICENSE
+├── README.md
+├── requirements.txt
+└── setup.py
 ```
 
 ## Installation
