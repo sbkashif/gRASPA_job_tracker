@@ -2,17 +2,18 @@
 project:
   name: "coremof_clean"  # Project name used for organizing data directories
 
+# Output directory structure
+output:
+  base_dir: ${PROJECT_ROOT}/examples/data/${project.name}/  # Base directory for output
+
 # Database configuration
 database:
-  # Either specify an explicit path or let it auto-generate
   path: ${PROJECT_ROOT}/examples/data/${project.name}/raw
   # Only downloads if path doesn't exist or directory is empty
   remote_url: None
   extract: true  # Whether to extract the downloaded file (if using remote_url)
 
-# Output directory structure
-output:
-  base_dir: ${PROJECT_ROOT}/examples/data/${project.name}/  # Base directory for output
+
 
 # Batch settings
 batch:
