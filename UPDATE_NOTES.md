@@ -1,4 +1,30 @@
-# gRASPA Job Tracker Update Notes
+# gRASPA Job Tracker - Update Notes
+
+## March 28, 2025: Added Single CIF File Functionality
+
+### New Features
+
+#### Run Single CIF File
+- Added a new command line option `--run-single-cif` that allows running a simulation for a single CIF file
+- The option takes a file path to a CIF file as its argument
+- Results are stored in a structured directory format within the configured output directory
+
+#### Directory Structure for Single CIF Files
+- Single CIF file results are stored in: `<base_output_dir>/singles/<structure_name>/`
+- Within each structure directory:
+  - `scripts/`: Contains the job submission script
+  - `results/`: Contains the simulation results
+
+#### Job Tracking
+- Single CIF jobs are tracked in the same job status file as batch jobs
+- Single CIF jobs are assigned batch IDs in the format: `single_<structure_name>`
+
+### Usage Examples
+
+Run a simulation for a specific CIF file:
+```bash
+gRASPA_job_tracker -c config.yaml --run-single-cif path/to/structure.cif
+```
 
 ## 2025-03-28: Enhanced Job Duplicate Detection and Cancellation
 

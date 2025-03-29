@@ -165,6 +165,8 @@ def main():
     parser.add_argument('--resubmit-failed', action='store_true', help='Resubmit failed jobs (default: do not resubmit)')
     parser.add_argument('--update-status', action='store_true',
                         help='Just scan and update status of all batches without submitting new jobs')
+    parser.add_argument('--run-single-cif', type=str,
+                        help='Run simulation for a single CIF file (provide path to CIF file)')
     args = parser.parse_args()
     
     # Show version information
@@ -188,6 +190,37 @@ def main():
         
         # Display configuration summary
         display_config_summary(config)
+        
+        # Handle single CIF file run
+        if args.run_single_cif:
+            if not os.path.exists(args.run_single_cif):
+                print(f"⚠️ ERROR: CIF file not found: {args.run_single_cif}")
+                return
+            
+            print(f"=== Running simulation for single CIF file: {args.run_single_cif} ===")
+            
+            # Create and initialize JobTracker
+            tracker = JobTracker(config)
+            
+            # Ask for confirmation
+            if not args.no_confirm:
+                prompt = f"Submit job for CIF file: {os.path.basename(args.run_single_cif)}? [Y/n] "
+                if input(prompt).lower() in ['n', 'no']:
+                    print("Operation cancelled by user.")
+                    return
+            
+            # Run simulation for single CIF file
+            try:
+                success = tracker.run_single_cif(args.run_single_cif, dry_run=args.dry_run)
+                if success:
+                    print("✅ Job for single CIF file submitted successfully")
+                else:
+                    print("⚠️ Failed to submit job for single CIF file")
+            except Exception as e:
+                print(f"⚠️ Error submitting job: {e}")
+                if os.environ.get("DEBUG"):
+                    traceback.print_exc()
+            return
         
         # Set batch range if specified
         batch_range = None

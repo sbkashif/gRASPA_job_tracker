@@ -796,3 +796,97 @@ class JobTracker:
         print(f"Job status saved to: {self.job_status_file}")
         if self.failed_batches:
             print(f"Failed batches saved to: {self.failed_batches_file}")
+    
+    def run_single_cif(self, cif_path, dry_run=False):
+        """
+        Run a simulation for a single CIF file
+        
+        Args:
+            cif_path: Path to the CIF file
+            dry_run: If True, generate job script but don't submit
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        cif_name = os.path.basename(cif_path)
+        structure_name = os.path.splitext(cif_name)[0]
+        
+        print(f"Processing structure: {structure_name}")
+        
+        # Create a singles directory under the output directory structure
+        singles_dir = os.path.join(self.config['output'].get('base_dir', '.'), 'singles')
+        os.makedirs(singles_dir, exist_ok=True)
+        
+        # Create structure-specific directory for this single job
+        structure_dir = os.path.join(singles_dir, structure_name)
+        os.makedirs(structure_dir, exist_ok=True)
+        
+        # Create job scripts directory
+        scripts_dir = os.path.join(structure_dir, 'scripts')
+        os.makedirs(scripts_dir, exist_ok=True)
+        
+        # Create results directory
+        results_dir = os.path.join(structure_dir, 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        
+        # Copy CIF file to expected location if needed
+        target_cif_path = cif_path
+        if not cif_path.startswith(self.config['database']['path']):
+            target_cif_path = os.path.join(self.config['database']['path'], cif_name)
+            import shutil
+            shutil.copy(cif_path, target_cif_path)
+            print(f"Copied CIF file to database directory: {target_cif_path}")
+        
+        # Generate job script
+        job_script_path = os.path.join(scripts_dir, f"job_{structure_name}.sh")
+        print(f"Generating job script at: {job_script_path}")
+        
+        # Use the existing script generation logic but modify for single file
+        batch_manager = BatchManager(self.config)
+        
+        # Adjust the job script to output results to the structure-specific results directory
+        modified_config = self.config.copy()
+        modified_config['output'] = self.config['output'].copy()  # Deep copy the output dict
+        modified_config['output']['results'] = results_dir
+        batch_manager.config = modified_config
+        
+        structures = [structure_name]
+        batch_manager._create_job_script(structures, job_script_path)
+        
+        # Submit the job if not dry run
+        if not dry_run:
+            from .job_submitter import submit_job
+            job_id = submit_job(job_script_path)
+            if job_id:
+                print(f"Job submitted with ID: {job_id}")
+                print(f"Results will be stored in: {results_dir}")
+                
+                # Add to tracking
+                import pandas as pd
+                new_row = {
+                    'batch_id': f'single_{structure_name}',
+                    'structure': structure_name,
+                    'job_id': job_id,
+                    'status': 'SUBMITTED',
+                    'submit_time': pd.Timestamp.now(),
+                    'completion_time': None,
+                    'output_file': os.path.join(results_dir, f"{structure_name}_output.txt")
+                }
+                
+                # Update job status file
+                if os.path.exists(self.job_status_file):
+                    self.job_status = pd.read_csv(self.job_status_file)
+                    # Use concat instead of append (which is deprecated in newer pandas)
+                    self.job_status = pd.concat([self.job_status, pd.DataFrame([new_row])], ignore_index=True)
+                else:
+                    self.job_status = pd.DataFrame([new_row])
+                    
+                self.job_status.to_csv(self.job_status_file, index=False)
+                return True
+            else:
+                print("Job submission failed")
+                return False
+        else:
+            print(f"[DRY RUN] Would submit job script: {job_script_path}")
+            print(f"Results would be stored in: {results_dir}")
+            return True
