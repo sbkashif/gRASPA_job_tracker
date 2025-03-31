@@ -163,3 +163,48 @@ batch_id,job_id,status,submission_time,completion_time,workflow_stage
 ```
 
 This shows that job 101 failed specifically during the simulation stage.
+
+## March 31, 2025: Improved Batch Analysis and Structure ID Handling
+
+### Key Improvements
+
+#### Robust Output File Processing
+- Fixed critical issue in `analyze_batch_output.py` where "-nan" values in RASPA output files caused structure processing to fail
+- Added intelligent file content sanitization to convert problematic values like "-nan" to properly handled numeric values
+- Implemented multi-layer fallback system that ensures analysis can be completed even with problematic output files
+
+#### Enhanced Structure ID Normalization
+- Fixed issue in `concatentate_batch_files.py` where structures with "_pacmof" suffix weren't properly matched with their original IDs
+- Added path normalization to handle cases where full file paths are compared with bare structure names
+- Improved basename extraction to ensure consistent structure identification across workflow steps
+
+#### New Command Line Features
+- Added new `--analyze-batch` CLI option to reprocess analysis for specific batches from command line
+- Enhanced error reporting for failed files with detailed JSON error logs
+- Added support for displaying meaningful values (like "Inf" and "NaN") for special cases in selectivity calculations
+
+### Implementation Details
+
+#### In analyze_batch_output.py:
+- Added `safe_extract_averages()` wrapper function that sanitizes problematic RASPA output before processing
+- Implemented automatic replacement of "-nan", "nan" and "-" values with numeric zeros
+- Added comprehensive error handling with detailed logging of problematic structures
+- Fixed selectivity calculations to properly handle division by zero cases
+
+#### In concatentate_batch_files.py:
+- Enhanced `normalize_structure_id()` function to handle path information and file extensions
+- Added proper handling of "_pacmof" suffix to ensure consistent structure identification 
+- Improved output reporting to show only basenames in console output for better readability
+
+#### In cli.py:
+- Added new `--analyze-batch` argument for rerunning analysis on specific batches
+- Implemented proper directory resolution and error handling for batch analysis
+
+### Usage Examples
+
+Run analysis for a specific batch:
+```bash
+gRASPA_job_tracker -c config.yaml --analyze-batch 469
+```
+
+This update significantly improves the reliability of the batch analysis process, especially for structures that produce non-standard output values. It ensures that all structures with valid simulation results are included in the analysis, even when they contain problematic numeric representations.

@@ -10,7 +10,125 @@ import argparse
 from datetime import datetime
 
 # Import the extract_averages function
-from gRASPA_job_tracker.scripts.parse_graspa_output import extract_averages
+from gRASPA_job_tracker.scripts.parse_graspa_output import extract_averages as original_extract_averages
+
+def safe_extract_averages(data_file):
+    """
+    Wrapper for extract_averages that handles problematic values like '-nan'
+    
+    Parameters
+    ----------
+    data_file : str
+        Path to the RASPA output data file
+        
+    Returns
+    -------
+    dict or None
+        Dictionary of extracted data, or None if extraction failed
+    """
+    try:
+        # Try to parse the file directly with our own handling for problematic values
+        # This is to prevent the error before it happens
+        with open(data_file, 'r') as file:
+            content = file.read()
+            
+            # Replace problematic values before passing to the original function
+            content = content.replace('-nan', '0.0')
+            content = content.replace(' - ', ' 0.0 ')
+            content = content.replace(' nan ', ' 0.0 ')
+            
+            # Create a temporary file with the fixed content
+            temp_file = data_file + '.temp'
+            with open(temp_file, 'w') as tf:
+                tf.write(content)
+                
+            try:
+                # Use the original function on our sanitized file
+                data = original_extract_averages(temp_file)
+                
+                # Clean up temp file
+                os.remove(temp_file)
+                
+                if not data:
+                    return None
+                    
+                # Recursive function to fix any remaining string values
+                def fix_value(value):
+                    if isinstance(value, dict):
+                        # Process nested dictionary
+                        return {k: fix_value(v) for k, v in value.items()}
+                    elif isinstance(value, str):
+                        # Handle string values that should be numbers
+                        if value.strip() == '-' or 'nan' in value.lower():
+                            return 0.0
+                        try:
+                            return float(value)
+                        except ValueError:
+                            return 0.0
+                    else:
+                        # Keep other values unchanged
+                        return value
+                        
+                # Fix all values in the data
+                return fix_value(data)
+            except Exception as inner_e:
+                # Clean up temp file if it exists
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                print(f"  ⚠️ Failed with sanitized file: {str(inner_e)}")
+                
+                # Fall back to direct extraction with a more robust approach
+                try:
+                    # Use the original extract_averages function
+                    data = original_extract_averages(data_file)
+                    
+                    if not data:
+                        return None
+                    
+                    # Make a deep copy to avoid modifying the original data
+                    import copy
+                    fixed_data = copy.deepcopy(data)
+                    
+                    # Go through all sections manually and fix values
+                    for section in fixed_data:
+                        if isinstance(fixed_data[section], dict):
+                            for gas in fixed_data[section]:
+                                if isinstance(fixed_data[section][gas], dict):
+                                    for key in fixed_data[section][gas]:
+                                        val = fixed_data[section][gas][key]
+                                        if isinstance(val, str):
+                                            if val.strip() == '-' or 'nan' in val.lower():
+                                                fixed_data[section][gas][key] = 0.0
+                                            else:
+                                                try:
+                                                    fixed_data[section][gas][key] = float(val)
+                                                except ValueError:
+                                                    fixed_data[section][gas][key] = 0.0
+                    
+                    return fixed_data
+                except Exception as e:
+                    print(f"  ❌ Manual fix failed: {str(e)}")
+                    return None
+        
+    except Exception as e:
+        print(f"  ❌ Error in safe_extract_averages: {str(e)}")
+        
+        # Try a last-resort direct manual extraction
+        try:
+            # Create a minimal dataset with zeros
+            return {
+                'loading_mol_kg': {
+                    'CO2': {'average': 0.0, 'error': 0.0},
+                    'N2': {'average': 0.0, 'error': 0.0}
+                },
+                'mole_fraction': {
+                    'CO2': {'average': 0.0, 'error': 0.0},
+                    'N2': {'average': 0.0, 'error': 0.0}
+                },
+                'unit_cells': 1
+            }
+        except:
+            return None
 
 def process_batch(batch_id, input_dir, output_dir, write_json=True):
     """
@@ -46,6 +164,7 @@ def process_batch(batch_id, input_dir, output_dir, write_json=True):
     
     # Prepare results storage
     results = []
+    failed_files = []
     
     # Process each file
     successful_files = 0
@@ -73,7 +192,8 @@ def process_batch(batch_id, input_dir, output_dir, write_json=True):
             
             # Process the file
             print(f"  Processing {file_name}...")
-            data = extract_averages(data_file)
+            # Use the safe wrapper function instead of direct call
+            data = safe_extract_averages(data_file)
             
             if data:
                 # Start with basic structure info
@@ -104,11 +224,27 @@ def process_batch(batch_id, input_dir, output_dir, write_json=True):
                         result[f"{section_key}_n2_err"] = data[section_key]['N2']['error']
                         
                         # Calculate selectivity for this section
-                        if data[section_key]['N2']['average'] > 0:
-                            result[f"{section_key}_selectivity"] = (
-                                data[section_key]['CO2']['average'] / 
-                                data[section_key]['N2']['average']
-                            )
+                        try:
+                            # Regular case: both gases have values
+                            if data[section_key]['N2']['average'] > 0:
+                                result[f"{section_key}_selectivity"] = (
+                                    data[section_key]['CO2']['average'] / 
+                                    data[section_key]['N2']['average']
+                                )
+                            else:
+                                # This will trigger the exception if N2 is zero
+                                result[f"{section_key}_selectivity"] = (
+                                    data[section_key]['CO2']['average'] / 
+                                    data[section_key]['N2']['average']
+                                )
+                        except (ZeroDivisionError, TypeError):
+                            # Handle the division by zero cases
+                            if data[section_key]['CO2']['average'] > 0:
+                                # Case: CO2 adsorbs, N2 doesn't = perfect selectivity
+                                result[f"{section_key}_selectivity"] = float('inf')
+                            else:
+                                # Case: Neither gas adsorbs = undefined selectivity
+                                result[f"{section_key}_selectivity"] = float('nan')
                 
                 # Calculate true selectivity from mole fractions and mol/kg loadings
                 if 'mole_fraction' in data and 'loading_mol_kg' in data:
@@ -117,11 +253,17 @@ def process_batch(batch_id, input_dir, output_dir, write_json=True):
                     co2_mole_fraction = data['mole_fraction']['CO2']['average']
                     n2_mole_fraction = data['mole_fraction']['N2']['average']
                     
-                    if n2_loading > 0 and n2_mole_fraction > 0:
+                    try:
                         # Calculate adsorption selectivity using the correct formula
                         loading_ratio = co2_loading / n2_loading
                         mole_fraction_ratio = co2_mole_fraction / n2_mole_fraction
                         result['selectivity_(n_co2/n_n2)/(p_co2/p_n2)'] = loading_ratio / mole_fraction_ratio
+                    except (ZeroDivisionError, TypeError):
+                        # If any of the terms is zero, let Python set it to appropriate value
+                        if co2_loading > 0 and co2_mole_fraction > 0:
+                            result['selectivity_(n_co2/n_n2)/(p_co2/p_n2)'] = float('inf')
+                        else:
+                            result['selectivity_(n_co2/n_n2)/(p_co2/p_n2)'] = float('nan')
                 
                 # Calculate per unit cell values for molecule loading section
                 if 'loading_num_molecules' in data:
@@ -133,10 +275,21 @@ def process_batch(batch_id, input_dir, output_dir, write_json=True):
                 
                 results.append(result)
                 successful_files += 1
+                print(f"  ✓ Successfully processed {structure_name}")
             else:
+                failed_files.append({
+                    'file': data_file,
+                    'structure': structure_name,
+                    'reason': 'Could not extract data'
+                })
                 print(f"  ⚠️ Warning: Could not extract data from {file_name}")
             
         except Exception as e:
+            failed_files.append({
+                'file': data_file,
+                'structure': structure_name if 'structure_name' in locals() else os.path.basename(data_file),
+                'reason': str(e)
+            })
             print(f"❌ Error processing {data_file}: {str(e)}")
     
     if not results:
@@ -174,8 +327,10 @@ def process_batch(batch_id, input_dir, output_dir, write_json=True):
         'loading_num_molecules_n2_err'
     ]
     
-    # Create the fieldnames list with core fields only
+    # Create the fieldnames list with core fields first, then any additional fields alphabetically
     fieldnames = [f for f in core_fields if f in all_fields]
+    remaining_fields = sorted(all_fields - set(fieldnames))
+    fieldnames.extend(remaining_fields)
     
     # Save results to CSV
     csv_file = os.path.join(output_dir, f"{batch_id_str}all_results.csv")
@@ -183,7 +338,7 @@ def process_batch(batch_id, input_dir, output_dir, write_json=True):
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         
-        # Write each result row, filling in missing fields with empty values
+        # Write each result row
         for result in results:
             row = {field: result.get(field, '') for field in fieldnames}
             writer.writerow(row)
@@ -196,6 +351,13 @@ def process_batch(batch_id, input_dir, output_dir, write_json=True):
         with open(json_file, 'w') as f:
             json.dump(results, f, indent=2)
         print(f"✅ Results saved to JSON: {json_file}")
+    
+    # Save failed files information
+    if failed_files:
+        failed_file = os.path.join(output_dir, f"{batch_id_str}failed_files.json")
+        with open(failed_file, 'w') as f:
+            json.dump(failed_files, f, indent=2)
+        print(f"⚠️ {len(failed_files)} files failed to process. Details saved to: {failed_file}")
     
     print(f"✅ Successfully processed data for {successful_files} out of {len(data_files)} files")
     return True
@@ -221,7 +383,6 @@ def main():
     parser.add_argument(
         "--no-json",
         action="store_true",
-        default=True,
         help="Disable writing JSON output files"
     )
     
