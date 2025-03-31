@@ -4,7 +4,7 @@ import sys
 import time
 from typing import Dict, Any
 import traceback
-import pandas
+import pandas as pd
 
 from .config_parser import ConfigParser
 from .job_tracker import JobTracker
@@ -167,7 +167,24 @@ def main():
     parser.add_argument('--update-status', action='store_true',
                         help='Just scan and update status of all batches without submitting new jobs')
     parser.add_argument('--run-single-cif', type=str,
-                        help='Run simulation for a single CIF file (provide path to CIF file)')
+                        help='Run simulation for a single CIF file (provide path to CIF file')
+    
+    # Add concatenate-results option
+    parser.add_argument('--concatenate-results', action='store_true',
+                        help='Concatenate CSV results from multiple batches into a single file')
+    parser.add_argument('--result-type', 
+                        choices=['analysis'],
+                        default='analysis',
+                        help='Type of results to concatenate (currently only analysis is supported)')
+    parser.add_argument('--output-file', type=str,
+                        help='Path to the output concatenated CSV file')
+    parser.add_argument('--all-batches', action='store_true',
+                        help='Concatenate all available batches (if not specified, --min-batch and --max-batch are required)')
+    
+    # Add analyze-batch option
+    parser.add_argument('--analyze-batch', type=int,
+                        help='Analyze output for a specific batch ID')
+    
     args = parser.parse_args()
     
     # Show version information
@@ -191,6 +208,121 @@ def main():
         
         # Display configuration summary
         display_config_summary(config)
+        
+        # Handle concatenate results option
+        if args.concatenate_results:
+            # Import here to avoid circular imports
+            from .scripts.concatentate_batch_files import concatenate_csv_files
+            
+            if not args.output_file:
+                print("⚠️ ERROR: --output-file is required with --concatenate-results")
+                sys.exit(1)
+            print("=== Concatenating Batch Results ===")
+            
+            # Determine which directory to use based on result type
+            if args.result_type == 'analysis':
+                if 'output' not in config or 'results_dir' not in config['output'] or not config['output']['results_dir']:
+                    print("⚠️ ERROR: Results directory not specified in configuration")
+                    sys.exit(1)
+                    
+                target_dir = config['output']['results_dir']
+                if not os.path.isdir(target_dir):
+                    print(f"⚠️ ERROR: Results directory not found: {target_dir}")
+                    print(f"Make sure simulations have been run and the directory exists")
+                    sys.exit(1)
+            else:
+                print(f"⚠️ ERROR: Result type '{args.result_type}' is not supported")
+                sys.exit(1)
+            
+            print(f"Target directory: {target_dir}")
+            
+            # Determine batch range
+            batch_range = None
+            if not args.all_batches:
+                if args.min_batch is None or args.max_batch is None:
+                    print("⚠️ ERROR: Both --min-batch and --max-batch are required when not using --all-batches")
+                    print("          Alternatively, use --all-batches to concatenate all batch files")
+                    sys.exit(1)
+                
+                batch_range = (args.min_batch, args.max_batch)
+                print(f"Concatenating batches in range: {batch_range[0]} to {batch_range[1]}")
+            else:
+                print("Concatenating all available batch files")
+                
+            # Get batch size for completeness checking
+            expected_batch_size = config['batch'].get('size', None) if 'batch' in config else None
+                                    
+            # Call concatenate function
+            success = concatenate_csv_files(
+                target_dir,
+                batch_range=batch_range,
+                output_dir=config['output']['base_dir'],
+                output_file_name=args.output_file,
+                all_files=args.all_batches,
+                result_type=args.result_type,
+                expected_batch_size=expected_batch_size,
+                verbose=True
+            )
+            
+            return 0 if success else 1
+        
+        # Handle analyze-batch option
+        if args.analyze_batch is not None:
+            # Import here to avoid circular imports
+            from .scripts.analyze_batch_output import process_batch
+            
+            print(f"=== Analyzing Batch {args.analyze_batch} ===")
+            
+            # Determine directories
+            if 'output' not in config or 'results_dir' not in config['output'] or not config['output']['results_dir']:
+                print("⚠️ ERROR: Results directory not specified in configuration")
+                sys.exit(1)
+                
+            results_dir = config['output']['results_dir']
+            batch_dir = f"batch_{args.analyze_batch}"
+            input_dir = os.path.join(results_dir, batch_dir, "simulation")
+            output_dir = os.path.join(results_dir, batch_dir, "analysis")
+            
+            # Check if input directory exists
+            if not os.path.isdir(input_dir):
+                print(f"⚠️ ERROR: Simulation directory not found: {input_dir}")
+                print(f"Make sure the batch has been simulated and the directory exists")
+                sys.exit(1)
+            
+            print(f"Simulation directory: {input_dir}")
+            print(f"Output directory: {output_dir}")
+            
+            # Ask for confirmation
+            if not args.no_confirm:
+                prompt = f"Process analysis for batch {args.analyze_batch}? [Y/n] "
+                if input(prompt).lower() in ['n', 'no']:
+                    print("Operation cancelled by user.")
+                    return
+                    
+            # Run the analysis
+            try:
+                success = process_batch(args.analyze_batch, input_dir, output_dir, write_json=True)
+                if success:
+                    print(f"✅ Analysis for batch {args.analyze_batch} completed successfully")
+                    
+                    # Report about potential issues detected by the safe_extract_averages function
+                    failed_file = os.path.join(output_dir, f"batch_{args.analyze_batch}_failed_files.json")
+                    if os.path.exists(failed_file):
+                        import json
+                        with open(failed_file, 'r') as f:
+                            failed_data = json.load(f)
+                            print(f"⚠️ {len(failed_data)} structures had issues during analysis.")
+                            print(f"   Details saved to: {failed_file}")
+                else:
+                    print(f"⚠️ Analysis for batch {args.analyze_batch} failed")
+                    sys.exit(1)
+            except Exception as e:
+                print(f"⚠️ Error processing batch {args.analyze_batch}: {e}")
+                if os.environ.get("DEBUG"):
+                    traceback.print_exc()
+                sys.exit(1)
+            
+            return
         
         # Handle single CIF file run
         if args.run_single_cif:

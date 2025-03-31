@@ -96,7 +96,7 @@ else
 fi
 
 # Check for required auxiliary scripts and copy them from scripts directory
-required_scripts=("start_as_root.sh" "stop_as_root.sh" "2-update_unit_cells.sh" "mincell.py")
+required_scripts=("start_as_root.sh" "stop_as_root.sh" "update_unit_cells.sh" "mincell.py")
 for script in "${required_scripts[@]}"; do
   if [ -f "$scripts_dir/$script" ]; then
     cp -v "$scripts_dir/$script" .
@@ -172,7 +172,7 @@ for run_name in "${processed_files[@]}"; do
   cd "$base_name"
 
   # Update unit cells
-  cp -v "../2-update_unit_cells.sh" update_unit_cells.sh
+  cp -v "../update_unit_cells.sh" update_unit_cells.sh
   cp -v "../mincell.py" .
 
   # If the cif file contains '.' in its name, rename it
