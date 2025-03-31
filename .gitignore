@@ -41,3 +41,4 @@ slurm-*.out
 # OS specific
 .DS_Store
 Thumbs.db
+run_new_tracker.sh
