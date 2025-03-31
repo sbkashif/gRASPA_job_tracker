@@ -18,5 +18,5 @@ source deactivate graspa
 export LD_LIBRARY_PATH=$HOME/software/gcc-13.3.0/lib64:$LD_LIBRARY_PATH
 source activate graspa
 
-gRASPA_job_tracker -c examples/config-coremof-clean.yaml --min-batch 421 --max-batch 450 --no-confirm
+gRASPA_job_tracker -c examples/config-coremof-clean.yaml --min-batch 551 --no-confirm
 
