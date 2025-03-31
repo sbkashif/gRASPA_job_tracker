@@ -70,7 +70,7 @@ class JobTracker:
                                           parse_dates=['submission_time', 'completion_time'])
         else:
             self.job_status = pd.DataFrame(columns=[
-                'batch_id', 'job_id', 'status', 'submission_time', 'completion_time'
+                'batch_id', 'job_id', 'status', 'submission_time', 'completion_time', 'workflow_stage'
             ])
             self.job_status.to_csv(self.job_status_file, index=False)
             # Explicitly set the types
@@ -79,7 +79,8 @@ class JobTracker:
                 'job_id': int,
                 'status': str,
                 'submission_time': 'datetime64[ns]',
-                'completion_time': 'datetime64[ns]'
+                'completion_time': 'datetime64[ns]',
+                'workflow_stage': str
             })
         # Initialize failed batches list
         if os.path.exists(self.failed_batches_file):
@@ -215,6 +216,18 @@ class JobTracker:
                         print(f"Job {job_id} for batch {batch_id}: {new_status}")
                     else:
                         print(f"Job {job_id} status: {new_status}")
+                    
+                # Update workflow stage information for all jobs
+                if new_status in ['RUNNING', 'PENDING', 'COMPLETED', 'FAILED']:
+                    # Get the current workflow stage using the job scheduler's method
+                    workflow_stage = self.job_scheduler._get_current_workflow_stage(batch_id, new_status)
+                    
+                    # Only update if it's different from current value
+                    current_workflow_stage = self.job_status.loc[mask, 'workflow_stage'].iloc[0] if not pd.isna(self.job_status.loc[mask, 'workflow_stage'].iloc[0]) else ""
+                    if workflow_stage != current_workflow_stage:
+                        self.job_status.loc[mask, 'workflow_stage'] = workflow_stage
+                        print(f"Updated workflow stage for batch {batch_id}: {current_workflow_stage} → {workflow_stage}")
+                        status_changes = True
             
             # Add to running jobs set if still active
             if new_status in ['RUNNING', 'PENDING']:
@@ -261,8 +274,12 @@ class JobTracker:
     
     def _get_next_batch_id(self) -> int:
         """Get the next batch ID to process"""
-        # Get all batch IDs that are currently being processed (any status)
-        in_progress_batch_ids = set(self.job_status['batch_id'])
+        # Get all batch IDs that are currently being processed (any status except FAILED)
+        # MODIFIED: Don't consider FAILED jobs as in progress when resubmitting
+        if self.resubmit_failed:
+            in_progress_batch_ids = set(self.job_status[~self.job_status['status'].isin(['FAILED'])]['batch_id'])
+        else:
+            in_progress_batch_ids = set(self.job_status['batch_id'])
         
         # First, try to process any failed batches if resubmission is enabled
         if self.resubmit_failed and self.failed_batches:
@@ -277,11 +294,15 @@ class JobTracker:
                 available_failed_batches = [b for b in filtered_failed_batches if b not in in_progress_batch_ids]
                 
                 if available_failed_batches:
+                    # ADDED: Improved logging
+                    print(f"Found {len(available_failed_batches)} failed batches eligible for resubmission")
                     return min(available_failed_batches)
             else:
                 # Only consider failed batches that aren't currently in progress
                 available_failed_batches = [b for b in self.failed_batches if b not in in_progress_batch_ids]
                 if available_failed_batches:
+                    # ADDED: Improved logging
+                    print(f"Found {len(available_failed_batches)} failed batches eligible for resubmission")
                     return min(available_failed_batches)
         
         # Then, find the next batch that hasn't been processed or isn't in progress
@@ -298,7 +319,7 @@ class JobTracker:
             if batch_id not in in_progress_batch_ids:
                 return batch_id
         
-        # If all batches have been processed or are in progress, return -1
+        # If we've already submitted jobs for all batches in the range
         return -1
     
     def prepare_environment(self) -> bool:
@@ -517,6 +538,15 @@ class JobTracker:
             
         # Double check that this batch isn't already in progress (just to be safe)
         batch_jobs = self.job_status[self.job_status['batch_id'] == next_batch_id]
+        
+        # For resubmission of failed jobs, we need to clear the existing entries
+        # MODIFIED: If job is failed and we're resubmitting, remove from job_status first
+        if self.resubmit_failed and next_batch_id in self.failed_batches and not batch_jobs.empty:
+            if all(status == 'FAILED' for status in batch_jobs['status']):
+                print(f"Removing failed job entries for batch {next_batch_id} to enable resubmission")
+                self.job_status = self.job_status[self.job_status['batch_id'] != next_batch_id]
+                batch_jobs = self.job_status[self.job_status['batch_id'] == next_batch_id]  # Should now be empty
+        
         if not batch_jobs.empty:
             active_jobs = batch_jobs[batch_jobs['status'].isin(['PENDING', 'RUNNING'])]
             if not active_jobs.empty:
@@ -538,9 +568,6 @@ class JobTracker:
                 batch_files = [str(file_path) for file_path in batch_files if file_path]
             except ValueError:
                 print(f"⚠️ Could not create or find batch {next_batch_id}. Skipping.")
-                # Add to failed batches to avoid retrying
-                self.failed_batches.add(int(next_batch_id))
-                self._save_failed_batches()
                 return False
         
         # Skip empty batches
@@ -556,7 +583,6 @@ class JobTracker:
         # Submit the job - pass batch_id to store the relationship
         print(f"Submitting job for batch {next_batch_id} with {len(batch_files)} CIF files...")
         job_id = self.job_scheduler.submit_job(script_path, dry_run=dry_run, batch_id=next_batch_id)
-        
         if job_id:
             # Update job status
             new_row = {
@@ -564,7 +590,8 @@ class JobTracker:
                 'job_id': int(job_id) if job_id != "dry-run" else "dry-run",
                 'status': 'PENDING' if job_id != "dry-run" else "DRY-RUN",
                 'submission_time': self._format_timestamp(),
-                'completion_time': None
+                'completion_time': None,
+                'workflow_stage': 'pending'  # ADDED: Initialize workflow stage
             }
             # Create a new DataFrame with the same dtypes as self.job_status
             new_df = pd.DataFrame([new_row], columns=self.job_status.columns).astype(self.job_status.dtypes)
@@ -573,9 +600,10 @@ class JobTracker:
             
             # Remove batch from failed batches if it was a retry
             if next_batch_id in self.failed_batches:
+                print(f"✓ Batch {next_batch_id} resubmitted successfully, removing from failed batches")
                 self.failed_batches.remove(next_batch_id)
                 self._save_failed_batches()
-                
+            
             print(f"✓ Submitted job for batch {next_batch_id} with job ID {job_id}")
             return True
         else:
@@ -674,10 +702,14 @@ class JobTracker:
             dry_run: If True, only generate job scripts but don't submit them
             resubmit_failed: If provided, overrides the current resubmit_failed setting
         """
-        # Allow overriding the resubmit_failed setting
+        # ADDED: More explicit resubmit_failed handling
         if resubmit_failed is not None:
             self.resubmit_failed = resubmit_failed
-            
+            if self.resubmit_failed:
+                print("🔄 Resubmission of failed jobs is ENABLED")
+            else:
+                print("ℹ️ Resubmission of failed jobs is DISABLED")
+        
         print("=== Starting gRASPA Job Tracker ===")
         print(f"Output path: {self.output_path}")
         print(f"Maximum concurrent jobs: {self.max_concurrent_jobs}")
@@ -691,6 +723,12 @@ class JobTracker:
         if self.batch_range:
             min_batch, max_batch = self.batch_range
             print(f"Batch range: {min_batch or 'START'} to {max_batch or 'END'}")
+        
+        # ADDED: Log any failed batches at the start
+        if self.failed_batches:
+            print(f"Found {len(self.failed_batches)} failed batches: {sorted(self.failed_batches)}")
+            if self.resubmit_failed:
+                print("These failed batches will be resubmitted")
         
         # Prepare environment first
         if not self.prepare_environment():
@@ -814,7 +852,7 @@ class JobTracker:
         print(f"Processing structure: {structure_name}")
         
         # Create a singles directory under the output directory structure
-        singles_dir = os.path.join(self.config['output'].get('base_dir', '.'), 'singles')
+        singles_dir = os.path.join(self.config['output']['base_dir'], 'singles')
         os.makedirs(singles_dir, exist_ok=True)
         
         # Create structure-specific directory for this single job
@@ -831,9 +869,12 @@ class JobTracker:
         
         # Copy CIF file to expected location if needed
         target_cif_path = cif_path
+        if not os.path.exists(cif_path):
+            print(f"❌ CIF file not found: {cif_path}")
+            return False
+        
         if not cif_path.startswith(self.config['database']['path']):
             target_cif_path = os.path.join(self.config['database']['path'], cif_name)
-            import shutil
             shutil.copy(cif_path, target_cif_path)
             print(f"Copied CIF file to database directory: {target_cif_path}")
         
@@ -841,52 +882,91 @@ class JobTracker:
         job_script_path = os.path.join(scripts_dir, f"job_{structure_name}.sh")
         print(f"Generating job script at: {job_script_path}")
         
-        # Use the existing script generation logic but modify for single file
-        batch_manager = BatchManager(self.config)
+        # Determine the next available batch ID by checking existing batch files
+        batch_dir = self.config['output']['batches_dir']
+        batch_files = [f for f in os.listdir(batch_dir) 
+                      if f.startswith('batch_') and f.endswith('.csv')]
         
-        # Adjust the job script to output results to the structure-specific results directory
+        # Extract numbers from batch_X.csv filenames and find max
+        batch_numbers = []
+        for f in batch_files:
+            try:
+                num_part = f.replace('batch_', '').replace('.csv', '')
+                batch_numbers.append(int(num_part))
+            except ValueError:
+                continue
+        
+        # Use max batch number + 1, or start from 1 if none exists
+        batch_id = max(batch_numbers) + 1 if batch_numbers else 1
+        
+        print(f"Assigned batch ID: {batch_id}")
+        
+        # Create a batch file for this single CIF
+        batch_file = os.path.join(batch_dir, f'batch_{batch_id}.csv')
+        
+        # Create a batch CSV file with this single CIF file
+        batch_df = pd.DataFrame({'file_path': [target_cif_path]})
+        batch_df.to_csv(batch_file, index=False)
+        print(f"Created batch file: {batch_file}")
+        
+        # Create batch results directory
+        batch_results_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
+        os.makedirs(batch_results_dir, exist_ok=True)
+        
+        # Create a modified config for the job scheduler with the correct output directory
         modified_config = self.config.copy()
-        modified_config['output'] = self.config['output'].copy()  # Deep copy the output dict
-        modified_config['output']['results'] = results_dir
-        batch_manager.config = modified_config
+        modified_config['output'] = self.config['output'].copy()
         
-        structures = [structure_name]
-        batch_manager._create_job_script(structures, job_script_path)
+        # Create a temporary directory for script generation
+        temp_scripts_dir = os.path.join(singles_dir, 'temp_scripts')
+        os.makedirs(temp_scripts_dir, exist_ok=True)
+        modified_config['output']['scripts_dir'] = temp_scripts_dir
+        
+        # Use the job scheduler with modified config
+        job_scheduler = JobScheduler(modified_config)
+        
+        # Create the job script - this will return a path to the generated script
+        try:
+            script_path = job_scheduler.create_job_script(batch_id, [target_cif_path])
+            
+            if script_path and os.path.exists(script_path):
+                # Copy the generated script to our desired location
+                shutil.copy(script_path, job_script_path)
+                print(f"Created job script: {job_script_path}")
+            else:
+                print("❌ Failed to generate job script")
+                return False
+        except Exception as e:
+            print(f"❌ Error generating job script: {e}")
+            return False
         
         # Submit the job if not dry run
         if not dry_run:
-            from .job_submitter import submit_job
-            job_id = submit_job(job_script_path)
+            job_id = job_scheduler.submit_job(job_script_path, batch_id=batch_id)
             if job_id:
                 print(f"Job submitted with ID: {job_id}")
-                print(f"Results will be stored in: {results_dir}")
+                print(f"Results will be stored in: {batch_results_dir}")
                 
-                # Add to tracking
-                import pandas as pd
+                # Update job status
+                timestamp = self._format_timestamp()
                 new_row = {
-                    'batch_id': f'single_{structure_name}',
-                    'structure': structure_name,
-                    'job_id': job_id,
-                    'status': 'SUBMITTED',
-                    'submit_time': pd.Timestamp.now(),
-                    'completion_time': None,
-                    'output_file': os.path.join(results_dir, f"{structure_name}_output.txt")
+                    'batch_id': batch_id,  # Now using an integer batch ID
+                    'job_id': job_id if job_id != "dry-run" else "dry-run",
+                    'status': 'PENDING',
+                    'submission_time': timestamp,
+                    'completion_time': None
                 }
                 
-                # Update job status file
-                if os.path.exists(self.job_status_file):
-                    self.job_status = pd.read_csv(self.job_status_file)
-                    # Use concat instead of append (which is deprecated in newer pandas)
-                    self.job_status = pd.concat([self.job_status, pd.DataFrame([new_row])], ignore_index=True)
-                else:
-                    self.job_status = pd.DataFrame([new_row])
-                    
-                self.job_status.to_csv(self.job_status_file, index=False)
+                # Create a new DataFrame with correct types and append
+                new_df = pd.DataFrame([new_row], columns=self.job_status.columns).astype(self.job_status.dtypes)
+                self.job_status = pd.concat([self.job_status, new_df], ignore_index=True)
+                self._save_job_status()
+                
                 return True
             else:
-                print("Job submission failed")
+                print("❌ Job submission failed")
                 return False
         else:
             print(f"[DRY RUN] Would submit job script: {job_script_path}")
-            print(f"Results would be stored in: {results_dir}")
+            print(f"Results would be stored in: {batch_results_dir}")
             return True

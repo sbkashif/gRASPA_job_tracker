@@ -4,6 +4,7 @@ import sys
 import time
 from typing import Dict, Any
 import traceback
+import pandas
 
 from .config_parser import ConfigParser
 from .job_tracker import JobTracker
@@ -193,25 +194,54 @@ def main():
         
         # Handle single CIF file run
         if args.run_single_cif:
-            if not os.path.exists(args.run_single_cif):
+            # Path auto-completion logic
+            cif_path = args.run_single_cif
+            
+            # If the path doesn't exist as provided, try auto-completing it
+            if not os.path.exists(cif_path):
+                # Try appending to project directory structure if relative path
+                if not os.path.isabs(cif_path):
+                    # Check in standard locations
+                    potential_paths = [
+                        # Direct in output base dir
+                        os.path.join(config['output']['base_dir'], cif_path),
+                        # In the raw database dir
+                        os.path.join(config['database']['path'], os.path.basename(cif_path)),
+                        # In examples/data/raw
+                        os.path.join(os.path.dirname(os.path.dirname(config['output']['base_dir'])), 
+                                    "data/raw", os.path.basename(cif_path)),
+                        # In current directory
+                        os.path.join(os.getcwd(), cif_path),
+                    ]
+                    
+                    for path in potential_paths:
+                        if os.path.exists(path):
+                            cif_path = path
+                            print(f"Path auto-completed to: {cif_path}")
+                            break
+            
+            if not os.path.exists(cif_path):
                 print(f"⚠️ ERROR: CIF file not found: {args.run_single_cif}")
+                print("Attempted to find the file in:")
+                for path in potential_paths:
+                    print(f"  - {path}")
                 return
             
-            print(f"=== Running simulation for single CIF file: {args.run_single_cif} ===")
+            print(f"=== Running simulation for single CIF file: {cif_path} ===")
             
             # Create and initialize JobTracker
             tracker = JobTracker(config)
             
             # Ask for confirmation
             if not args.no_confirm:
-                prompt = f"Submit job for CIF file: {os.path.basename(args.run_single_cif)}? [Y/n] "
+                prompt = f"Submit job for CIF file: {os.path.basename(cif_path)}? [Y/n] "
                 if input(prompt).lower() in ['n', 'no']:
                     print("Operation cancelled by user.")
                     return
             
             # Run simulation for single CIF file
             try:
-                success = tracker.run_single_cif(args.run_single_cif, dry_run=args.dry_run)
+                success = tracker.run_single_cif(cif_path, dry_run=args.dry_run)
                 if success:
                     print("✅ Job for single CIF file submitted successfully")
                 else:
@@ -236,6 +266,37 @@ def main():
             try:
                 tracker.clean_job_status()
                 running_jobs = tracker._get_running_jobs()
+                
+                print("\n=== Updating Workflow Stages ===")
+                fixed_count = 0
+                
+                # We'll use the job scheduler's method for workflow stage detection
+                # This avoids hardcoding and handles all cases appropriately
+                for idx, row in tracker.job_status.iterrows():
+                    batch_id = row['batch_id']
+                    job_id = row['job_id']
+                    status = row['status']
+                    current_workflow_stage = row['workflow_stage'] if not pd.isna(row['workflow_stage']) else ""
+                    
+                    # Get batch output directory to use for detecting workflow stage
+                    batch_output_dir = os.path.join(tracker.results_dir, f'batch_{batch_id}')
+                    
+                    # Use job scheduler's method to determine current workflow stage
+                    # This method already handles all statuses correctly including COMPLETED, FAILED, etc.
+                    new_workflow_stage = tracker.job_scheduler._get_current_workflow_stage(batch_id, status)
+                    
+                    # Only update if different from current value
+                    if new_workflow_stage != current_workflow_stage:
+                        tracker.job_status.loc[idx, 'workflow_stage'] = new_workflow_stage
+                        print(f"Updated workflow stage for batch {batch_id}: {current_workflow_stage or '(empty)'} → {new_workflow_stage}")
+                        fixed_count += 1
+                
+                # Save the job status if we made any changes
+                if fixed_count > 0:
+                    print(f"Updated workflow stage for {fixed_count} jobs")
+                    tracker._save_job_status()
+                else:
+                    print("No workflow stage updates needed")
                 
                 print("\n=== Job Status Update Summary ===")
                 if tracker.job_status.empty:

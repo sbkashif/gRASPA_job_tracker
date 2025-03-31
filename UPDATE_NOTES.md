@@ -90,3 +90,76 @@ This system allows for more efficient resource utilization by:
 4. Providing clear visual indicators of workflow progress
 
 No configuration changes are needed to use these features - they are automatically applied to all workflows.
+
+## Update Notes - Workflow Stage Tracking
+
+### Overview
+
+This update enhances job status tracking by adding a `workflow_stage` column to the job status CSV file. This allows you to see which specific stage of the workflow pipeline each job is currently in or where it failed.
+
+### Changes
+
+#### 1. Enhanced Job Status CSV Format
+
+The job status CSV now includes a new column:
+
+```
+batch_id,job_id,status,submission_time,completion_time,workflow_stage
+```
+
+The `workflow_stage` column indicates:
+- For running jobs: The specific workflow step currently executing (e.g., "partial_charge", "simulation", "analysis")
+- For completed jobs: Simply "completed"
+- For failed jobs: Which stage it failed at (e.g., "simulation (failed)")
+- For pending jobs: "pending"
+
+#### 2. Added Workflow Stage Tracking Logic
+
+- Added the `_get_current_workflow_stage()` method that examines output directories to determine the current stage
+- Updated the `update_job_status_csv()` method to include workflow stage information
+- Added special handling for single CIF file runs vs. batch runs
+
+#### 3. Migration Script
+
+Added `migrate_job_status.py` to update existing job status CSV files to the new format:
+- Creates a backup of the original file
+- Adds the workflow_stage column
+- Intelligently sets appropriate workflow stage values based on job status
+
+### How to Migrate Existing Job Status Files
+
+Run the migration script:
+
+```bash
+cd /projects/bcvz/sbinkashif/gRASPA_job_tracker
+python -m gRASPA_job_tracker.migrate_job_status
+```
+
+Or with a specific path:
+
+```bash
+python -m gRASPA_job_tracker.migrate_job_status /path/to/job_status.csv
+```
+
+### Benefits
+
+1. **Better Debugging**: Quickly identify which stage of the workflow pipeline failed
+2. **Progress Tracking**: See which stage each running job is currently in
+3. **Completion Status**: Clear indication of jobs that have completed the entire workflow
+4. **Unified Tracking**: Works for both batch processing and single-file processing
+
+### Example
+
+Before:
+```
+batch_id,job_id,status,submission_time,completion_time
+101,12345,FAILED,2025-03-27 17:11:03,2025-03-27 19:30:30.113957167
+```
+
+After:
+```
+batch_id,job_id,status,submission_time,completion_time,workflow_stage
+101,12345,FAILED,2025-03-27 17:11:03,2025-03-27 19:30:30.113957167,simulation (failed)
+```
+
+This shows that job 101 failed specifically during the simulation stage.
