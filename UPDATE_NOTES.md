@@ -1,5 +1,125 @@
 # gRASPA Job Tracker - Update Notes
 
+## April 2, 2025: Comprehensive Testing Framework for Simulation Results
+
+### Added Testing Framework
+
+- **Complete Testing System**: Implemented a comprehensive testing framework for validating simulation results
+  - Tests can be run interactively, via JSON templates, or through automated unittest integration
+  - Multiple interfaces available: direct script, CLI integration, and Python unittest framework
+  - Support for both batch-specific testing and consolidated CSV file testing
+
+- **Interactive Testing Mode**:
+  - Added ability to test results interactively with immediate feedback
+  - Supports listing available batches and selecting structures through the CLI
+  - Color-coded output for clear pass/fail identification
+
+- **JSON-Based Testing**:
+  - Support for creating and using JSON templates of expected values
+  - Enables reproducible testing across different environments and runs
+  - JSON templates can span multiple batches and structures for comprehensive testing
+
+- **Unittest Integration**:
+  - Full Python unittest framework integration for CI/CD pipelines
+  - Automatically generates test cases from JSON templates
+  - Supports standard unittest discovery protocols
+
+- **Combined CSV Testing Support**: 
+  - Added ability to test against consolidated CSV files instead of batch-specific result files
+  - New `--test-csv` parameter for specifying any CSV file containing simulation results
+  - Tests work identically regardless of whether structures are in batch directories or consolidated files
+
+- **CLI Integration**:
+  - Added `--test` command to main CLI tool for running tests directly
+  - Supports multiple testing modes with options for specific batches and custom JSON files
+  - Integrates all testing capabilities into the main tool workflow
+
+### Technical Implementation
+
+- **Core Testing Module**:
+  - Created `test_batch_results.py` with core testing functionality
+  - Implements configurable tolerance for numeric comparisons (default: 1%)
+  - Supports exclusion of calculated columns (like selectivity) from testing
+
+- **Unittest Integration**:
+  - Added `test_batch_results_cli.py` for unittest framework integration
+  - Dynamic test method generation based on expected values JSON
+  - Compatible with standard unittest discovery protocols (`python -m unittest discover`)
+
+- **Flexible Structure Finding**:
+  - Enhanced structure lookup to find test candidates across different result formats
+  - Works with standard batch result directories, consolidated CSV files, and varying naming conventions
+  - Intelligent path normalization to handle file paths, bare structure names, and suffixes
+
+- **Comprehensive Results Reporting**:
+  - Added detailed test summary showing pass/fail status for each structure
+  - Shows percentage of successful tests and identifies specific failed comparisons
+  - Color-coded output makes successful and failed tests easy to identify
+
+### Usage Examples
+
+Create a test JSON template:
+```bash
+gRASPA_job_tracker -c config.yaml --test --test-batch 524 --test-json tests/expected_values.json
+```
+
+## March 31, 2025: Fixed Exit Status Handling in MPS Run Scripts
+
+### Issue Fixed
+
+Fixed a critical issue where job scripts weren't correctly capturing and preserving the exit status of simulation runs. This occurred specifically with the `mps_run.sh` script, which correctly detected and reported simulation failures but the status wasn't being properly captured by the job scheduler.
+
+### Key Improvements
+
+- **Immediate Exit Status Capture**: Modified the job script generator to immediately capture the simulation exit status before any other commands can modify it
+- **Status Preservation**: Added dedicated storage of the simulation status in a variable that persists through the entire script
+- **Accurate Failure Detection**: The job scheduler now correctly captures cases where simulations fail due to missing exit_status.log files or other errors
+- **Proper Error Propagation**: The exit status from the simulation is now properly propagated to the overall job status
+
+### Technical Implementation
+
+The following changes were made to improve exit status handling:
+
+1. In `_generate_bash_step()`, immediately capture the exit status after running mps_run.sh:
+   ```bash
+   content += f"bash {script_to_run} {batch_id} {input_file} {scripts_dir} .\n"
+   content += f"simulation_status=$?\n"
+   content += f"# Write exit status to log file immediately\n"
+   content += f"echo $simulation_status > exit_status.log\n"
+   ```
+
+2. In `_generate_workflow_steps()`, use the stored simulation_status variable:
+   ```bash
+   if step_name == 'simulation' or 'mps_run' in script_path:
+       steps_content += f"    # For simulation steps, use the existing simulation_status variable\n"
+       steps_content += f"    {step_var_name}=$simulation_status\n"
+   ```
+
+3. Avoid overwriting the simulation exit status when writing the job's overall exit status
+
+These changes ensure that when simulations fail due to missing logs or other errors, the job is properly marked as failed in the job tracker system.
+
+## March 31, 2025: Fixed Missing "fi" Statements in Generated Job Scripts
+
+### Issue Fixed
+
+Fixed a critical issue in the job script generator where the generated shell scripts had missing `fi` statements to close `if` blocks. This syntax error caused job scripts to fail with:
+
+```
+/var/spool/slurmd/job8759973/slurm_script: line 166: syntax error: unexpected end of file
+```
+
+### Technical Implementation
+
+Added proper closure of `if` blocks in the `_generate_workflow_steps()` method:
+
+```python
+# Added missing closing statement at the end of each workflow step
+steps_content += "fi\n"
+```
+
+This ensures each workflow step's `if/else` block is properly closed with a matching `fi` statement, preventing shell syntax errors.
+
 ## March 31, 2025: Improved Batch Analysis and Structure ID Handling
 
 ### Key Improvements
@@ -208,3 +328,4 @@ Run a simulation for a specific CIF file:
 ```bash
 gRASPA_job_tracker -c config.yaml --run-single-cif path/to/structure.cif
 ```
+
