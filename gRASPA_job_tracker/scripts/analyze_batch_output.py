@@ -329,8 +329,8 @@ def process_batch(batch_id, input_dir, output_dir, write_json=True):
     
     # Create the fieldnames list with core fields first, then any additional fields alphabetically
     fieldnames = [f for f in core_fields if f in all_fields]
-    remaining_fields = sorted(all_fields - set(fieldnames))
-    fieldnames.extend(remaining_fields)
+    #remaining_fields = sorted(all_fields - set(fieldnames))
+    #fieldnames.extend(remaining_fields)
     
     # Save results to CSV
     csv_file = os.path.join(output_dir, f"{batch_id_str}all_results.csv")
