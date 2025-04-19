@@ -11,6 +11,8 @@ import concurrent.futures
 from functools import partial
 from tqdm import tqdm
 import glob
+import time
+import threading
 
 def is_already_processed(cif_path, output_dir):
     """Check if a CIF file has already been processed.
@@ -32,6 +34,59 @@ def get_memory_usage():
     process = psutil.Process(os.getpid())
     return process.memory_info().rss / 1024 / 1024  # in MB
 
+class TimeoutError(Exception):
+    """Exception raised when a function call times out."""
+    pass
+
+def process_cif_with_timeout(cif_path, output_dir, timeout=3600):
+    """Run a process with a timeout using a separate thread.
+    
+    Args:
+        cif_path: Path to the CIF file
+        output_dir: Directory where output should be saved
+        timeout: Timeout in seconds (default: 3600 seconds = 1 hour)
+        
+    Returns:
+        tuple: (cif_path, status) where status is: 
+               1 for success, 0 for failure, -1 for skipped, -2 for timeout
+    """
+    result = [None]
+    thread_exception = [None]
+    
+    def target():
+        try:
+            base_name = os.path.splitext(os.path.basename(cif_path))[0]
+            
+            # Run PACMoF to get charges
+            pacmof2.get_charges(cif_path, output_dir, identifier="_pacmof", multiple_cifs=False)
+            result[0] = 1  # Success
+        except Exception as e:
+            thread_exception[0] = e
+            result[0] = 0  # Failure
+
+    thread = threading.Thread(target=target)
+    thread.daemon = True
+    
+    print(f"Memory before processing: {get_memory_usage():.2f} MB")
+    print(f"Processing: {cif_path}")
+    
+    thread.start()
+    thread.join(timeout)
+    
+    if thread.is_alive():
+        # Timeout occurred
+        print(f"WARNING: Structure {os.path.basename(cif_path)} exceeded the 1 hour time limit. Skipping this structure.")
+        # There's no clean way to kill a thread in Python, 
+        # but since it's a daemon thread it will be terminated when the program exits
+        return (cif_path, -2)  # Timeout
+    
+    if thread_exception[0] is not None:
+        print(f"Error processing {cif_path}: {str(thread_exception[0])}")
+        return (cif_path, 0)  # Failure
+    
+    print(f"Memory after processing: {get_memory_usage():.2f} MB")
+    return (cif_path, result[0])
+
 def process_cif(cif_path, output_dir):
     """Process a single CIF file to generate partial charges.
     
@@ -40,21 +95,15 @@ def process_cif(cif_path, output_dir):
         output_dir: Directory where output should be saved
         
     Returns:
-        tuple: (cif_path, status) where status is: 1 for success, 0 for failure, -1 for skipped
+        tuple: (cif_path, status) where status is: 
+               1 for success, 0 for failure, -1 for skipped, -2 for timeout
     """
     if is_already_processed(cif_path, output_dir):
         print(f"Skipping already processed file: {cif_path}")
         return (cif_path, -1)
     
-    try:
-        print(f"Memory before processing: {get_memory_usage():.2f} MB")
-        print(f"Processing: {cif_path}")
-        pacmof2.get_charges(cif_path, output_dir, identifier="_pacmof", multiple_cifs=False)
-        print(f"Memory after processing: {get_memory_usage():.2f} MB")
-        return (cif_path, 1)
-    except Exception as e:
-        print(f"Error processing {cif_path}: {str(e)}")
-        return (cif_path, 0)
+    # Use a 1-hour timeout (3600 seconds)
+    return process_cif_with_timeout(cif_path, output_dir, timeout=3600)
 
 def count_completed_files(output_dir):
     """Count number of completed CIF files in output directory."""
@@ -115,6 +164,7 @@ def generate_charges(batch_id, input_file, output_dir):
     successful = 0
     failed = 0
     skipped = 0
+    timed_out = 0
     
     # Create progress bar
     pbar = tqdm(total=len(input_cifs), desc="Processing structures")
@@ -130,13 +180,16 @@ def generate_charges(batch_id, input_file, output_dir):
                 successful += 1
             elif status == 0:
                 failed += 1
-            else:  # status == -1
+            elif status == -1:
                 skipped += 1
+            elif status == -2:
+                timed_out += 1
             pbar.update(1)
     
     pbar.close()
     print(f"Successfully processed {successful} files")
     print(f"Skipped {skipped} already processed files")
+    print(f"Timed out on {timed_out} files (exceeded 1 hour limit)")
     print(f"Failed to process {failed} files")
     
     # Create a record file listing the processed files
@@ -145,10 +198,23 @@ def generate_charges(batch_id, input_file, output_dir):
         for cif_path in input_cifs:
             f.write(f"{os.path.basename(cif_path)}\n")
     
+    # Create a separate record for timed-out files
+    if timed_out > 0:
+        timeout_file = os.path.join(output_dir, f"timeout_files_batch_{batch_id}.txt")
+        with open(timeout_file, 'w') as f:
+            f.write(f"The following files timed out (exceeded 1 hour limit):\n")
+            # Need to reprocess to identify which ones timed out
+            for cif_path in input_cifs:
+                base_name = os.path.splitext(os.path.basename(cif_path))[0]
+                processed_file = os.path.join(output_dir, f"{base_name}_pacmof.cif")
+                if not os.path.exists(processed_file):
+                    f.write(f"{os.path.basename(cif_path)}\n")
+        print(f"Created timeout record file: {timeout_file}")
+    
     print(f"Partial charges generated successfully in {output_dir}")
     print(f"Created record file: {record_file}")
     
-    # Return success only if all files were processed successfully
+    # Return success only if all files were processed successfully (excluding timeouts)
     return 0 if failed == 0 else 1
 
 def main():
