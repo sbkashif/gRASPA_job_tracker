@@ -230,6 +230,26 @@ class BatchManager:
     
     def get_num_batches(self) -> int:
         """Get the total number of batches"""
+        # If batch directory exists and has batch files, count actual batches
+        if os.path.exists(self.batch_dir):
+            batch_files = [f for f in os.listdir(self.batch_dir) 
+                           if f.startswith('batch_') and f.endswith('.csv')]
+            
+            if batch_files:
+                # Get the maximum batch number from filenames
+                max_batch = 0
+                for filename in batch_files:
+                    try:
+                        # Extract the number from batch_X.csv
+                        batch_num = int(filename.replace('batch_', '').replace('.csv', ''))
+                        max_batch = max(max_batch, batch_num)
+                    except ValueError:
+                        pass
+                        
+                return max_batch
+        
+        # If no batch files found or directory doesn't exist, 
+        # calculate theoretical number (for initial batch creation)
         if not self.cif_files:
             return 0
         return math.ceil(len(self.cif_files) / self.batch_size)
