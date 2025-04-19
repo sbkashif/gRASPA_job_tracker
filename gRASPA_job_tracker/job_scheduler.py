@@ -333,7 +333,15 @@ class JobScheduler:
             
             # Add status check
             step_var_name = f"{step_name.lower().replace('-', '_')}_status"
-            steps_content += f"    {step_var_name}=$?\n"
+            
+            # For simulation scripts, use the stored simulation_status variable
+            if step_name == 'simulation' or 'mps_run' in script_path:
+                steps_content += f"    # For simulation steps, use the existing simulation_status variable\n"
+                steps_content += f"    {step_var_name}=$simulation_status\n"
+            else:
+                # For regular scripts, capture exit status as usual
+                steps_content += f"    {step_var_name}=$?\n"
+                
             steps_content += f"    if [ ${step_var_name} -ne 0 ]; then\n"
             steps_content += f"        echo '❌ {step_name} failed'\n"
             
@@ -344,9 +352,14 @@ class JobScheduler:
                 steps_content += "        # Continue despite failure in this optional step\n"
                     
             steps_content += "    fi\n"
-            steps_content += f"    # Write exit status to file\n"
-            steps_content += f"    echo $? > {exit_status_file}\n"
-            steps_content += "fi\n\n"
+            
+            # Only write exit status to file for non-simulation steps as simulation exit status is already written
+            if step_name != 'simulation' and 'mps_run' not in script_path:
+                steps_content += f"    # Write exit status to file\n"
+                steps_content += f"    echo $? > {exit_status_file}\n"
+            
+            # Close the "else" block from "if already completed successfully"
+            steps_content += "fi\n"
             
             # Ensure the script does not exit prematurely after the simulation step
             if step_name == 'simulation':
@@ -445,12 +458,24 @@ class JobScheduler:
                         content += f"export TEMPLATE_SIMULATION_INPUT={template_env_var}\n"
                     
                     # We're already in the output directory, pass batch_id, input_dir, output_dir, scripts_dir
+                    content += f"# Run simulation and IMMEDIATELY capture its exit status\n"
                     content += f"bash {script_to_run} {batch_id} {input_file} {scripts_dir} .\n"
+                    content += f"simulation_status=$?\n"
+                    
+                    # Store the status for later use before any other commands execute
+                    content += f"# Write exit status to log file immediately\n"
+                    content += f"echo $simulation_status > exit_status.log\n"
+                    
                 else:
                     # For first step or when input_file is a file list
                     content += f"# First step: setting up input/output directories\n"
                     # We're already in the output directory, pass batch_id, input_dir, output_dir, scripts_dir
                     content += f"bash {script_to_run} {batch_id} {input_file} {scripts_dir} .\n"
+                    content += f"simulation_status=$?\n"
+                    
+                    # Store the status for later use before any other commands execute
+                    content += f"# Write exit status to log file immediately\n"
+                    content += f"echo $simulation_status > exit_status.log\n"
                     
                     # Export template as environment variable instead of argument
                     if template_env_var and not template_file_path:  # Only if we didn't already set it above
@@ -466,7 +491,13 @@ class JobScheduler:
                     content += f"bash {script_to_run} {batch_id} {input_file}\n"
             
             # Capture exit status and clean up on success
-            content += f"script_status=$?\n"
+            if 'mps_run' in script_path:
+                # For mps_run scripts, use the already captured simulation_status
+                content += f"script_status=$simulation_status\n"
+            else:
+                # For regular scripts, capture the exit status now
+                content += f"script_status=$?\n"
+                
             content += f"if [ $script_status -eq 0 ]; then\n"
             content += f"    # Clean up unnecessary files on success\n"
             content += f"    rm -f ./{local_script}\n"
@@ -478,8 +509,9 @@ class JobScheduler:
             # Remove the explicit exit call for mps_run but keep for other scripts
             # This fixes the premature job termination issue
             if 'mps_run' in script_path or step_name == 'simulation':
-                # Just use the return command without exit for simulation scripts
+                # Just return without exit but store the status for the workflow
                 content += f"# Avoid exit for simulation scripts to prevent premature job termination\n"
+                content += f"simulation_status=$script_status\n"
             else:
                 content += f"exit $script_status\n"
             
@@ -543,12 +575,12 @@ class JobScheduler:
                 content += f"# Execute script locally\n"
                 content += f"python ./{local_script} {args_str}\n"
                 
-                # Capture exit status and clean up on success
-                content += f"script_status=$?\n"
-                content += f"if [ $script_status -eq 0]; then\n"
-                content += f"    # Clean up unnecessary files on success\n"
+                # Capture exit status and clean up on success - fix potential escaping/string interpolation issues
+                content += "script_status=$?\n"
+                content += "if [ $script_status -eq 0 ]; then\n"
+                content += "    # Clean up unnecessary files on success\n"
                 content += f"    rm -f ./{local_script}\n"
-                content += f"fi\n"
+                content += "fi\n"
                 
                 # Return to original directory
                 content += f"cd -\n"
@@ -572,7 +604,7 @@ class JobScheduler:
                 
                 # Execute module
                 content += f"python -m {script_path} {args_str}\n"
-                content += f"script_status=$?\n"
+                content += "script_status=$?\n"
                 content += f"cd -\n"
                 
                 # Prevent premature job termination for simulation scripts
