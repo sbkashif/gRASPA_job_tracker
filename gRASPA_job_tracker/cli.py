@@ -169,6 +169,10 @@ def main():
     parser.add_argument('--run-single-cif', type=str,
                         help='Run simulation for a single CIF file (provide path to CIF file')
     
+    # Add submit-batch option
+    parser.add_argument('--submit-batch', type=int,
+                        help='Submit a specific batch ID for processing')
+    
     # Add concatenate-results option
     parser.add_argument('--concatenate-results', action='store_true',
                         help='Concatenate CSV results from multiple batches into a single file')
@@ -185,6 +189,18 @@ def main():
     parser.add_argument('--analyze-batch', type=int,
                         help='Analyze output for a specific batch ID')
     
+    # Add test option
+    parser.add_argument('--test', '-t', action='store_true', 
+                        help='Run tests for batch results')
+    parser.add_argument('--test-batch', type=int,
+                        help='Specify a batch ID to test (requires --test)')
+    parser.add_argument('--test-json', type=str, default='tests/expected_values.json',
+                        help='JSON file with test data (requires --test)')
+    parser.add_argument('--test-unittest', action='store_true',
+                        help='Use Python unittest framework for tests (requires --test)')
+    parser.add_argument('--test-csv', type=str,
+                        help='Test against a specific CSV file instead of batch results (requires --test)')
+    
     args = parser.parse_args()
     
     # Show version information
@@ -199,6 +215,157 @@ def main():
         print(f"✅ Created default configuration at {args.config}")
         print("Please edit this file with your specific settings before running again.")
         return
+    
+    # Handle testing option
+    if args.test:
+        # Import test module
+        test_module_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tests")
+        sys.path.insert(0, test_module_path)
+        
+        try:
+            # Try to import test module
+            from tests.test_batch_results import run_unittest_suite, test_all_structures_from_json
+            
+            # Load and validate configuration
+            config_parser = ConfigParser(args.config)
+            config = config_parser.get_config()
+            
+            # Check that JSON file exists
+            if not os.path.exists(args.test_json):
+                # Try relative to project root
+                project_root = os.path.dirname(os.path.dirname(__file__))
+                test_json = os.path.join(project_root, args.test_json)
+                if not os.path.exists(test_json):
+                    # Try other common locations
+                    potential_paths = [
+                        args.test_json,  # Original path
+                        test_json,  # Project root path
+                        os.path.join(os.getcwd(), args.test_json),  # Current working directory
+                        os.path.join(project_root, "tests", os.path.basename(args.test_json))  # Tests directory
+                    ]
+                    
+                    for path in potential_paths:
+                        if os.path.exists(path):
+                            args.test_json = path
+                            break
+                    else:
+                        print(f"⚠️ ERROR: Test JSON file not found: {args.test_json}")
+                        print(f"Please create it first using the test_batch_results.py script.")
+                        sys.exit(1)
+                else:
+                    args.test_json = test_json
+            
+            # If batch ID is specified, run only that batch
+            if args.test_batch:
+                # Import directly from test module
+                from tests.test_batch_results import get_batch_results_path, list_structures, create_json_template
+                
+                batch_results_file = get_batch_results_path(config, args.test_batch)
+                if not batch_results_file:
+                    sys.exit(1)
+                
+                print(f"Using batch results file: {batch_results_file}")
+                
+                # Check if structures exist
+                structures = list_structures(batch_results_file)
+                if not structures:
+                    sys.exit(1)
+                
+                # Create template if requested
+                if not os.path.exists(args.test_json):
+                    print(f"Creating test template: {args.test_json}")
+                    df = pd.read_csv(batch_results_file)
+                    create_json_template(args.test_json, args.test_batch, structures, df.columns)
+                    print(f"Please edit {args.test_json} with expected values and run again.")
+                    sys.exit(0)
+            
+                
+            # After loading the test module but before running tests
+            if args.test_csv:
+                
+                # complete the path to the csv file
+                if not os.path.isabs(args.test_csv):
+                    # Try to complete the path
+                    args.test_csv = os.path.join(os.path.dirname(os.path.dirname(__file__)), args.test_csv)
+                
+                print(f"Using direct CSV file for testing: {args.test_csv}")
+                
+                # Import the necessary function from test_batch_results
+                from tests.test_batch_results import test_against_csv_file
+                
+                    
+                print(f"Using CSV file for testing: {args.test_csv}")
+                
+                # Run tests against the CSV file
+                success = test_against_csv_file(args.test_csv, args.test_json)
+                sys.exit(0 if success else 1)
+                
+            # Run tests based on mode
+            if args.test_unittest:
+                print(f"Running tests with unittest framework using: {args.test_json}")
+                success = run_unittest_suite(config, args.test_json)
+            else:
+                print(f"Running tests manually using: {args.test_json}")
+                success = test_all_structures_from_json(config, args.test_json)
+            
+            sys.exit(0 if success else 1)
+            
+        except ImportError as e:
+            print(f"⚠️ ERROR: Could not import test module: {e}")
+            print("Make sure the test_batch_results.py script exists in the tests directory.")
+            sys.exit(1)
+        except Exception as e:
+            print(f"⚠️ ERROR: Test execution failed: {e}")
+            if os.environ.get("DEBUG"):
+                traceback.print_exc()
+            sys.exit(1)
+    
+    # Handle submit-batch option
+    if args.submit_batch is not None:
+        print(f"=== Submitting Specific Batch {args.submit_batch} ===")
+        
+        # Load and validate configuration
+        config_parser = ConfigParser(args.config)
+        config = config_parser.get_config()
+        
+        # Set the batch range to target only this specific batch
+        batch_range = (args.submit_batch, args.submit_batch)
+        print(f"Processing batch: {args.submit_batch}")
+        
+        # Verify if batch exists
+        batch_manager = BatchManager(config)
+        if not batch_manager.has_batches() or args.submit_batch > batch_manager.get_num_batches():
+            print(f"⚠️ ERROR: Batch {args.submit_batch} does not exist.")
+            print("Make sure the batch has been prepared or run with --prepare-only first.")
+            return 1
+            
+        # Ask for confirmation
+        if not args.no_confirm:
+            prompt = f"Submit batch {args.submit_batch} for processing? [Y/n] "
+            if input(prompt).lower() in ['n', 'no']:
+                print("Operation cancelled by user.")
+                return
+        
+        # Submit the specific batch - using the normal job tracker approach
+        try:
+            # Create JobTracker with specific batch range
+            tracker = JobTracker(config, batch_range=batch_range)
+            
+            resubmit_failed = args.resubmit_failed if args.resubmit_failed else False
+            
+            print(f"Submitting batch {args.submit_batch}...")
+                
+            tracker.run(polling_interval=args.polling_interval,
+                        dry_run=args.dry_run,
+                        resubmit_failed=resubmit_failed)
+            if not tracker.job_status.empty:
+                print(f"Batch {args.submit_batch} submitted successfully")
+                return 0
+        except Exception as e:
+            print(f"⚠️ Error submitting batch: {e}")
+            if os.environ.get("DEBUG"):
+                traceback.print_exc()
+            return 1
     
     # Load and validate configuration
     try:
