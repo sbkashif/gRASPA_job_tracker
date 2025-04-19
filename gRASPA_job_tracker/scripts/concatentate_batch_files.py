@@ -40,13 +40,16 @@ def get_batch_num(filename):
     match = re.search(r'batch_(\d+)', os.path.basename(filename))
     return int(match.group(1)) if match else 0
 
-def normalize_structure_id(structure_id: str) -> str:
+def normalize_structure_id(structure_id: str) -> Tuple[str, str]:
     """
     Normalize structure IDs by removing paths, file extensions, and suffixes
     
     For example:
     /path/to/RIPPEN_clean.cif -> RIPPEN_clean
     RIPPEN_clean_pacmof -> RIPPEN_clean
+    
+    Also handles the case where dots (.) in original filename were replaced with
+    underscores (_) during simulation processing.
     
     Parameters
     ----------
@@ -55,8 +58,8 @@ def normalize_structure_id(structure_id: str) -> str:
         
     Returns
     -------
-    str
-        Normalized structure ID
+    Tuple[str, str]
+        Normalized structure ID and version with dots replaced by underscores
     """
     # First, remove file path if present (keep only filename)
     structure_id = os.path.basename(structure_id)
@@ -66,9 +69,12 @@ def normalize_structure_id(structure_id: str) -> str:
     
     # Remove _pacmof suffix if present
     if '_pacmof' in structure_id:
-        return structure_id.replace('_pacmof', '')
+        structure_id = structure_id.replace('_pacmof', '')
     
-    return structure_id
+    # Create a version with dots replaced by underscores for comparison
+    normalized_with_underscores = structure_id.replace('.', '_')
+    
+    return structure_id, normalized_with_underscores
 
 def find_batch_result_files(input_dir: str, batch_dirs: List[str], output_dir: str, 
                            result_type: str = 'analysis', verbose: bool = False) -> Tuple[List[str], Dict[str, Dict]]:
@@ -164,7 +170,7 @@ def find_batch_result_files(input_dir: str, batch_dirs: List[str], output_dir: s
                     for row in reader:
                         if row:  # Skip empty rows
                             orig_id = row[structure_col].strip()
-                            norm_id = normalize_structure_id(orig_id)
+                            norm_id, _ = normalize_structure_id(orig_id)
                             expected_structures[norm_id] = orig_id
                 
                 # Load actual structures from result file
@@ -183,13 +189,16 @@ def find_batch_result_files(input_dir: str, batch_dirs: List[str], output_dir: s
                     for row in reader:
                         if row:  # Skip empty rows
                             orig_id = row[structure_col].strip()
-                            norm_id = normalize_structure_id(orig_id)
+                            norm_id, _ = normalize_structure_id(orig_id)
                             actual_structures[norm_id] = orig_id
                 
                 # Find missing structures using normalized IDs
                 missing = []
                 for norm_id, orig_id in expected_structures.items():
-                    if norm_id not in actual_structures:
+                    norm_id_regular, norm_id_underscored = normalize_structure_id(orig_id)
+                    
+                    # Check if either version of the normalized ID exists in actual structures
+                    if norm_id_regular not in actual_structures and norm_id_underscored not in actual_structures:
                         missing.append(orig_id)
                 
                 if missing:
