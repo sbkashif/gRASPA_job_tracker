@@ -192,8 +192,8 @@ for run_name in "${processed_files[@]}"; do
   # Update  the FrameworkName in the simulation.input file
   
   #Now update the framework name in the simulation.input file
-  if ! sed -i "s/^FrameworkName.*/FrameworkName $run_name/" simulation.input; then
-    echo "Failed to update FrameworkName in input file: $run_name/simulation.input" >&2
+  if ! sed -i "s/^FrameworkName.*/FrameworkName $base_name/" simulation.input; then
+    echo "Failed to update FrameworkName in input file: $base_name/simulation.input" >&2
     exit 1
   fi
 
@@ -287,4 +287,10 @@ rm -v *.log || echo "⚠️ Warning: Could not remove log files"
 rm -v *.py || echo "⚠️ Warning: Could not remove auxiliary Python scripts"
 rm -v *.sh || echo "⚠️ Warning: Could not remove auxiliary scripts"
 
-echo " ✅ All simulations completed successfully"
+# if no missing logs or failed simulations, print success message
+if [ "$missing_logs" -eq 0 ] && [ "$failed_simulations" -eq 0 ]; then
+  echo "✅ All simulations completed successfully"
+else
+  echo "❌ Some simulations failed or are missing logs. Please check the output."
+  exit 1
+fi
