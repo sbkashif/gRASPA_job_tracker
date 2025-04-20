@@ -19,11 +19,23 @@ def extract_averages(filename):
         pressure = float(pressure_match.group(1)) if pressure_match else None
         temperature = float(temp_match.group(1)) if temp_match else None
         
+        # Extract framework mass
+        framework_mass_pattern = r'Framework total mass:\s+([\d\.]+)'
+        framework_mass_match = re.search(framework_mass_pattern, content)
+        framework_mass = float(framework_mass_match.group(1)) if framework_mass_match else None
+        
+        # Extract average volume
+        volume_pattern = r'=====================BLOCK AVERAGES \(VOLUME Å\^3\)================.*?Overall: Average: ([\d\.]+)'
+        volume_match = re.search(volume_pattern, content, re.DOTALL)
+        average_volume = float(volume_match.group(1)) if volume_match else None
+        
         # Initialize results dictionary
         results = {
             'unit_cells': unit_cells,
             'pressure': pressure,
-            'temperature': temperature
+            'temperature': temperature,
+            'framework_mass': framework_mass,
+            'average_volume': average_volume
         }
         
         # Define all the sections we want to extract
@@ -103,6 +115,8 @@ if __name__ == "__main__":
         print(f"File: {filename}")
         print(f"Pressure: {result['pressure']:.5f} Pa, Temperature: {result['temperature']:.5f} K")
         print(f"Total Unit Cells: {result['unit_cells']}")
+        print(f"Framework Mass: {result['framework_mass']:.5f} g")
+        print(f"Average Volume: {result['average_volume']:.5f} Å^3")
         
         # Print information for each section
         print("\n=== MOLECULE LOADING ===")
