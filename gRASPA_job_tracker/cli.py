@@ -189,6 +189,10 @@ def main():
     parser.add_argument('--analyze-batch', type=int,
                         help='Analyze output for a specific batch ID')
     
+    # Add analyze-batch-range option
+    parser.add_argument('--analyze-batch-range', action='store_true',
+                        help='Analyze output for a range of batches (requires --min-batch and --max-batch)')
+    
     # Add test option
     parser.add_argument('--test', '-t', action='store_true', 
                         help='Run tests for batch results')
@@ -474,7 +478,7 @@ def main():
                     
                     # Report about potential issues detected by the safe_extract_averages function
                     failed_file = os.path.join(output_dir, f"batch_{args.analyze_batch}_failed_files.json")
-                    if os.path.exists(failed_file):
+                    if (os.path.exists(failed_file)):
                         import json
                         with open(failed_file, 'r') as f:
                             failed_data = json.load(f)
@@ -485,6 +489,65 @@ def main():
                     sys.exit(1)
             except Exception as e:
                 print(f"⚠️ Error processing batch {args.analyze_batch}: {e}")
+                if os.environ.get("DEBUG"):
+                    traceback.print_exc()
+                sys.exit(1)
+            
+            return
+        
+        # Handle analyze-batch-range option
+        if args.analyze_batch_range:
+            # Import here to avoid circular imports
+            from .scripts.analyze_batch_output import process_batch_range
+            
+            print("=== Analyzing Batch Range ===")
+            
+            # Check for required parameters
+            if args.min_batch is None or args.max_batch is None:
+                print("⚠️ ERROR: Both --min-batch and --max-batch are required when using --analyze-batch-range")
+                sys.exit(1)
+                
+            # Determine base results directory
+            if 'output' not in config or 'results_dir' not in config['output'] or not config['output']['results_dir']:
+                print("⚠️ ERROR: Results directory not specified in configuration")
+                sys.exit(1)
+                
+            results_dir = config['output']['results_dir']
+            
+            # Check if results directory exists
+            if not os.path.isdir(results_dir):
+                print(f"⚠️ ERROR: Results directory not found: {results_dir}")
+                print(f"Make sure simulations have been run and the directory exists")
+                sys.exit(1)
+            
+            print(f"Results directory: {results_dir}")
+            print(f"Batch range: {args.min_batch} to {args.max_batch}")
+            
+            # Ask for confirmation
+            if not args.no_confirm:
+                prompt = f"Process analysis for batches {args.min_batch} to {args.max_batch}? [Y/n] "
+                if input(prompt).lower() in ['n', 'no']:
+                    print("Operation cancelled by user.")
+                    return
+                    
+            # Run the batch range analysis
+            try:
+                results = process_batch_range(
+                    args.min_batch,
+                    args.max_batch,
+                    results_dir,
+                    write_json=True,
+                    update_job_status=True  # Always update job status for batch range analysis
+                )
+                
+                # Return success if at least one batch succeeded
+                if any(results.values()):
+                    return 0
+                else:
+                    return 1
+                    
+            except Exception as e:
+                print(f"⚠️ Error processing batch range: {e}")
                 if os.environ.get("DEBUG"):
                     traceback.print_exc()
                 sys.exit(1)
