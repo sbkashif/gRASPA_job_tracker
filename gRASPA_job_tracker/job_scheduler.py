@@ -840,6 +840,60 @@ class JobScheduler:
             
         if status == "FAILED":
             return "failed"
+            
+        if status == "PARTIALLY_COMPLETE":
+            # For partially complete jobs, find the last completed step using exit status files
+            batch_output_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
+            if not os.path.exists(batch_output_dir):
+                return "partially_complete"
+                
+            # Get workflow steps from config
+            workflow_steps = []
+            
+            # Try to extract workflow stages in different ways depending on config structure
+            if 'workflow' in self.config and self.config['workflow']:
+                # Extract from explicit workflow definition
+                workflow_steps = [step.get('name', f'step_{i+1}') for i, step in enumerate(self.config['workflow'])]
+            elif 'scripts' in self.config and self.config['scripts']:
+                # Extract from scripts section
+                workflow_steps = list(self.config['scripts'].keys())
+            
+            # Use default steps if none found in config
+            if not workflow_steps:
+                workflow_steps = ['partial_charge', 'simulation', 'analysis']
+            
+            # Check for completed steps by looking for exit_status.log files with "0" value
+            completed_steps = []
+            last_successful_step = None
+            
+            # For each workflow step, check its exit status file
+            for step in workflow_steps:
+                step_dir = os.path.join(batch_output_dir, step)
+                exit_status_file = os.path.join(step_dir, 'exit_status.log')
+                
+                # If the directory doesn't exist, this step wasn't reached
+                if not os.path.exists(step_dir):
+                    continue
+                    
+                # Check if exit status file exists and read its content
+                if os.path.exists(exit_status_file):
+                    try:
+                        with open(exit_status_file, 'r') as f:
+                            exit_status = f.read().strip()
+                            if exit_status == '0':
+                                # Step completed successfully
+                                completed_steps.append(step)
+                                last_successful_step = step
+                    except:
+                        # If we can't read the file, consider the step didn't complete
+                        pass
+            
+            # If we found completed steps, report the last one
+            if last_successful_step:
+                return f"partially_complete (completed: {last_successful_step})"
+            
+            # If we couldn't determine which steps completed
+            return "partially_complete"
         
         # For RUNNING jobs - determine which workflow stage they're in
         batch_output_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
@@ -907,15 +961,6 @@ class JobScheduler:
                     
                     # If we can't extract cycle info but the dir exists
                     return f"{step} (running)"
-                    
-                elif step == 'analysis':
-                    # Check for specific analysis files
-                    analysis_files = os.listdir(step_dir) if os.path.exists(step_dir) else []
-                    
-                    if any(f.endswith('.csv') for f in analysis_files):
-                        return f"{step} (processing)"
-                    else:
-                        return f"{step} (starting)"
                 
                 # For other steps, just report the step name
                 return step

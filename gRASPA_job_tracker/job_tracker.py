@@ -181,14 +181,25 @@ class JobTracker:
                             new_status = 'COMPLETED'
                             print(f"✅ Job {job_id} for batch {batch_id} completed successfully")
                         else:
-                            new_status = 'FAILED'
-                            self.failed_batches.add(int(batch_id))
-                            print(f"⚠️ Job {job_id} for batch {batch_id} failed with exit status {exit_status}")
+                            # Check if partial completion - look for completed steps
+                            new_status = self._check_partial_completion(batch_id, batch_output_dir)
+                            if new_status == 'PARTIALLY_COMPLETE':
+                                print(f"⚠️ Job {job_id} for batch {batch_id} partially completed but failed at some step")
+                                # Don't add to failed_batches since it's partially complete
+                            else:
+                                new_status = 'FAILED'
+                                self.failed_batches.add(int(batch_id))
+                                print(f"❌ Job {job_id} for batch {batch_id} failed with exit status {exit_status}")
                 else:
-                    # No exit status file but job is not in queue - likely failed
-                    new_status = 'FAILED'
-                    self.failed_batches.add(int(batch_id))
-                    print(f"⚠️ Job {job_id} for batch {batch_id} is not in queue and no exit status file found")
+                    # No exit status file but job is not in queue - check for partial completion
+                    new_status = self._check_partial_completion(batch_id, batch_output_dir)
+                    if new_status == 'PARTIALLY_COMPLETE':
+                        print(f"⚠️ Job {job_id} for batch {batch_id} partially completed but failed at some step")
+                        # Don't add to failed_batches since it's partially complete
+                    else:
+                        new_status = 'FAILED'
+                        self.failed_batches.add(int(batch_id))
+                        print(f"❌ Job {job_id} for batch {batch_id} is not in queue and no exit status file found")
             else:
                 # Job might still be in queue, use scheduler's status check
                 new_status = self.job_scheduler.get_job_status(job_id, batch_output_dir)
@@ -203,6 +214,8 @@ class JobTracker:
                         print(f"📊 Job {job_id} for batch {batch_id} is now running")
                     elif new_status == 'COMPLETED':
                         print(f"✅ Job {job_id} for batch {batch_id} completed successfully")
+                    elif new_status == 'PARTIALLY_COMPLETE':
+                        print(f"⚠️ Job {job_id} for batch {batch_id} partially completed")
                     elif new_status == 'FAILED':
                         print(f"❌ Job {job_id} for batch {batch_id} failed")
                     else:
@@ -218,7 +231,7 @@ class JobTracker:
                         print(f"Job {job_id} status: {new_status}")
                     
                 # Update workflow stage information for all jobs
-                if new_status in ['RUNNING', 'PENDING', 'COMPLETED', 'FAILED']:
+                if new_status in ['RUNNING', 'PENDING', 'COMPLETED', 'FAILED', 'PARTIALLY_COMPLETE']:
                     # Get the current workflow stage using the job scheduler's method
                     workflow_stage = self.job_scheduler._get_current_workflow_stage(batch_id, new_status)
                     
@@ -234,7 +247,7 @@ class JobTracker:
                 running_jobs.add(job_id)
             else:
                 # Job is no longer running, update completion time    
-                if new_status in ['COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'UNKNOWN']:
+                if new_status in ['COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'UNKNOWN', 'PARTIALLY_COMPLETE']:
                     # Use formatted timestamp without fractional seconds
                     completion_time = self._format_timestamp()
                     self.job_status.loc[mask, 'completion_time'] = completion_time
@@ -247,16 +260,20 @@ class JobTracker:
                         with open(exit_status_file, 'r') as f:
                             exit_status = f.read().strip()
                             if exit_status != '0':
-                                self.failed_batches.add(int(batch_id))
-                                if new_status != 'FAILED':
-                                    print(f"⚠️ Updating status: Batch {batch_id} failed with exit code {exit_status}")
-                                    self.job_status.loc[mask, 'status'] = 'FAILED'
-                    elif new_status not in ['CANCELLED']:
+                                # Only add to failed batches if not partially complete
+                                if new_status != 'PARTIALLY_COMPLETE':
+                                    self.failed_batches.add(int(batch_id))
+                                    if new_status != 'FAILED':
+                                        print(f"⚠️ Updating status: Batch {batch_id} failed with exit code {exit_status}")
+                                        self.job_status.loc[mask, 'status'] = 'FAILED'
+                    elif new_status not in ['CANCELLED', 'PARTIALLY_COMPLETE']:
                         # No exit status file and not cancelled means the job failed
-                        self.failed_batches.add(int(batch_id))
-                        if new_status != 'FAILED':
-                            print(f"⚠️ Updating status: Batch {batch_id} failed - no exit status file")
-                            self.job_status.loc[mask, 'status'] = 'FAILED'
+                        # Only add to failed batches if not partially complete
+                        if new_status != 'PARTIALLY_COMPLETE':
+                            self.failed_batches.add(int(batch_id))
+                            if new_status != 'FAILED':
+                                print(f"⚠️ Updating status: Batch {batch_id} failed - no exit status file")
+                                self.job_status.loc[mask, 'status'] = 'FAILED'
                 else:
                     print(f"⚠️ Unknown status for job {job_id}: {new_status}")
                     # Use formatted timestamp without fractional seconds
@@ -271,6 +288,80 @@ class JobTracker:
             self._save_failed_batches()
         
         return running_jobs
+    
+    def _check_partial_completion(self, batch_id: int, batch_output_dir: str) -> str:
+        """
+        Check if a job was partially completed by looking for exit status log files
+        in each workflow step directory.
+        
+        Args:
+            batch_id: The batch ID to check
+            batch_output_dir: Path to the batch output directory
+            
+        Returns:
+            'PARTIALLY_COMPLETE' if partial completion detected, 'FAILED' otherwise
+        """
+        # Get workflow steps from the config
+        workflow_steps = []
+        
+        # Try to extract workflow stages from config structure
+        if 'workflow' in self.config and self.config['workflow']:
+            # Extract from explicit workflow definition
+            workflow_steps = [step.get('name', f'step_{i+1}') for i, step in enumerate(self.config['workflow'])]
+        elif 'scripts' in self.config and self.config['scripts']:
+            # Extract from scripts section - this is the most common case
+            workflow_steps = list(self.config['scripts'].keys())
+        
+        # If no workflow steps found, we can't check for partial completion
+        if not workflow_steps:
+            return 'FAILED'
+        
+        # Check for completed steps by looking for exit_status.log files with "0" value
+        completed_steps = []
+        failed_steps = []
+        
+        # For each workflow step, check its exit status file
+        for step in workflow_steps:
+            step_dir = os.path.join(batch_output_dir, step)
+            exit_status_file = os.path.join(step_dir, 'exit_status.log')
+            
+            # If the directory doesn't exist, this step wasn't reached
+            if not os.path.exists(step_dir):
+                continue
+                
+            # Check if exit status file exists and read its content
+            if os.path.exists(exit_status_file):
+                try:
+                    with open(exit_status_file, 'r') as f:
+                        exit_status = f.read().strip()
+                        if exit_status == '0':
+                            # Step completed successfully
+                            completed_steps.append(step)
+                        else:
+                            # Step failed
+                            failed_steps.append(step)
+                except:
+                    # If we can't read the file, consider the step failed
+                    failed_steps.append(step)
+            else:
+                # Directory exists but no exit status file - step likely started but didn't complete
+                failed_steps.append(step)
+        
+        # If any steps completed successfully but not all, consider it partially complete
+        if completed_steps and len(completed_steps) < len(workflow_steps):
+            # Calculate completion percentage for better reporting
+            completion_percentage = (len(completed_steps) / len(workflow_steps)) * 100
+            print(f"Batch {batch_id} partially completed {len(completed_steps)}/{len(workflow_steps)} steps ({completion_percentage:.1f}%): {', '.join(completed_steps)}")
+            return 'PARTIALLY_COMPLETE'
+        # If all steps completed, this shouldn't happen as the main exit status would be successful
+        elif len(completed_steps) == len(workflow_steps):
+            print(f"Batch {batch_id} appears to have all steps completed - should be marked as COMPLETED")
+            return 'COMPLETED'
+        # If no steps completed successfully
+        else:
+            if failed_steps:
+                print(f"Batch {batch_id} failed in steps: {', '.join(failed_steps)}")
+            return 'FAILED'
     
     def _get_next_batch_id(self) -> int:
         """Get the next batch ID to process"""
