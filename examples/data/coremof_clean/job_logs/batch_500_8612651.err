@@ -1,0 +1,8 @@
+A conda environment has been detected CONDA_PREFIX=
+/u/sbinkashif/.conda/envs/graspa 
+anaconda3_gpu is loaded. Consider running conda deactivate and reloading it.
+DeprecationWarning: 'source deactivate' is deprecated. Use 'conda deactivate'.
+Processing structures:   0%|          | 0/20 [00:00<?, ?it/s]/u/sbinkashif/.conda/envs/graspa/lib/python3.11/site-packages/ase/io/cif.py:401: UserWarning: crystal system 'triclinic' is not interpreted for space group Spacegroup(1, setting=1). This may result in wrong setting!
+  warnings.warn(
+Processing structures:   5%|▌         | 1/20 [01:04<20:25, 64.51s/it]Processing structures:  30%|███       | 6/20 [01:16<02:20, 10.05s/it]Processing structures:  40%|████      | 8/20 [01:22<01:32,  7.68s/it]Processing structures:  50%|█████     | 10/20 [01:54<01:43, 10.37s/it]Processing structures:  55%|█████▌    | 11/20 [02:10<01:43, 11.49s/it]Processing structures:  60%|██████    | 12/20 [02:19<01:27, 10.89s/it]Processing structures:  65%|██████▌   | 13/20 [02:23<01:04,  9.19s/it]Processing structures:  75%|███████▌  | 15/20 [02:26<00:30,  6.14s/it]Processing structures:  80%|████████  | 16/20 [03:07<00:55, 13.99s/it]Processing structures:  85%|████████▌ | 17/20 [03:10<00:33, 11.25s/it]Processing structures:  90%|█████████ | 18/20 [03:11<00:17,  8.62s/it]Processing structures:  95%|█████████▌| 19/20 [03:12<00:06,  6.63s/it]Processing structures: 100%|██████████| 20/20 [03:16<00:00,  5.79s/it]Processing structures: 100%|██████████| 20/20 [03:16<00:00,  9.81s/it]
+Cannot Open Restart/System_0//restartfile or Restart/System_0//previous_restartfile

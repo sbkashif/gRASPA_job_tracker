@@ -1,0 +1,63 @@
+UseGPUReduction no
+Useflag yes
+
+NumberOfInitializationCycles 2000000
+NumberOfEquilibrationCycles  0
+NumberOfProductionCycles 2000000
+
+UseChargesFromCIFFile yes
+
+UseMaxStep  yes
+MaxStepPerCycle 1
+
+RestartFile no
+RandomSeed  0
+
+Movies no
+MoviesEvery 3000000
+
+NumberOfTrialPositions 10
+NumberOfTrialOrientations 10
+
+NumberOfBlocks 1
+AdsorbateAllocateSpace 10240
+NumberOfSimulations 1
+SingleSimulation yes
+
+InputFileType cif
+FrameworkName WODRAK_clean_pacmof
+UnitCells 0 4 2 4
+
+ChargeMethod Ewald
+Temperature  298
+Pressure     100000
+
+OverlapCriteria 1e5
+CutOffVDW 12.8
+CutOffCoulomb 12.8
+EwaldPrecision 1e-6
+
+SaveOutputToFile yes
+
+
+Component 0 MoleculeName              CO2
+            IdealGasRosenbluthWeight  1.0
+            FugacityCoefficient       PR-EOS
+            MolFraction               0.15
+            TranslationProbability    1.0
+            RotationProbability       1.0
+            ReinsertionProbability    1.0
+            IdentityChangeProbability 1.0
+            SwapProbability           1.0
+            CreateNumberOfMolecules   0
+
+Component 1 MoleculeName              N2
+            IdealGasRosenbluthWeight  1.0
+            FugacityCoefficient       PR-EOS
+            MolFraction               0.85
+            TranslationProbability    1.0
+            RotationProbability       1.0
+            ReinsertionProbability    1.0
+            IdentityChangeProbability 1.0
+            SwapProbability           1.0
+            CreateNumberOfMolecules   0

@@ -1,0 +1,77 @@
+Starting job for batch 500 with 20 CIF files
+Job started at:  Thu Mar 27 22:02:30 CDT 2025
+Step 1: Partial Charge
+Batch ID: 500
+Input file list: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_500/cif_file_list.txt
+Output directory: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_500/partial_charge
+Found 20 CIF files to process
+Using 5 parallel workers (1 worker per CIF file)
+Memory before processing: 177.25 MB
+Processing: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/raw/WIZKOH_clean.cif
+Getting features from CIF
+Memory before processing: 177.25 MB
+Processing: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/raw/WIYZOU_clean.cif
+<< manually deleted lines to save space for git commit >>
+
+Writing CIF WODREO_clean_pacmof.cif
+Memory after processing: 19187.22 MB
+Successfully processed 20 files
+Skipped 0 already processed files
+Failed to process 0 files
+Partial charges generated successfully in /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_500/partial_charge
+Created record file: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_500/partial_charge/processed_samples_batch_500.txt
+Step 2: Simulation
+Batch ID: 500
+Input directory: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_500/partial_charge
+Output directory: .
+Found 20 CIF structure(s) in the input directory.
+The following structures will be simulated:
+WIYWUY_clean_pacmof WIYZOU_clean_pacmof WIZDEP_clean_pacmof WIZKOH_clean_pacmof WOBBOG_clean_pacmof WOBCAT_clean_pacmof WOBCIB_clean_pacmof WOBFOK_clean_pacmof WOBHEB01_clean_pacmof WOBHEB_clean_pacmof WOBHOL_clean_pacmof WOBHOM_clean_pacmof WOBQEL_clean_pacmof WOCGIG_clean_pacmof WOCWAN_clean_pacmof WODFOL_clean_pacmof WODPUC_clean_pacmof WODQUD_clean_pacmof WODRAK_clean_pacmof WODREO_clean_pacmof
+Copying cif files...
+gpua077.delta.ncsa.illinois.edu
+NVIDIA A100-SXM4-40GB
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/gRASPA_job_tracker/scripts/start_as_root.sh' -> './start_as_root.sh'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/gRASPA_job_tracker/scripts/stop_as_root.sh' -> './stop_as_root.sh'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/gRASPA_job_tracker/scripts/2-update_unit_cells.sh' -> './2-update_unit_cells.sh'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/gRASPA_job_tracker/scripts/mincell.py' -> './mincell.py'
+Copying forcefield files from environment variables...
+Copying /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/force_field_mixing_rules.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/force_field_mixing_rules.def' -> './force_field_mixing_rules.def'
+Copying /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/force_field.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/force_field.def' -> './force_field.def'
+Copying /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/pseudo_atoms.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/pseudo_atoms.def' -> './pseudo_atoms.def'
+Copying /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/CO2.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/CO2.def' -> './CO2.def'
+Copying /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/N2.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/N2.def' -> './N2.def'
+Starting simulation WIYWUY_clean_pacmof
+'./CO2.def' -> 'WIYWUY_clean_pacmof/CO2.def'
+'./force_field.def' -> 'WIYWUY_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'WIYWUY_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'WIYWUY_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'WIYWUY_clean_pacmof/pseudo_atoms.def'
+'WIYWUY_clean_pacmof.cif' -> 'WIYWUY_clean_pacmof/WIYWUY_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_500/simulation/simulation_template.input' -> 'WIYWUY_clean_pacmof/simulation.input'
+Replacing variables in WIYWUY_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../2-update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 1 3
+removed 'update_unit_cells.sh'
+<manually deleted lines to save space>
+
+Simulations completed. Now checking for errors...
+Cleaning up temporary files...
+ ✅ All simulations completed successfully
+/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples
+Simulation step completed. Proceeding to analysis...
+Step 3: Analysis
+▶ Found 20 output files to analyze
+  Processing System_0_WOCGIG_clean_pacmof.cif_3_3_2_298.000000_100000.000000.data...
+<manually delted lines to save space>
+✅ Results saved to CSV: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_500/analysis/batch_500_all_results.csv
+✅ Successfully processed data for 20 out of 20 files
+Job completed at:  Thu Mar 27 23:08:14 CDT 2025
