@@ -284,6 +284,7 @@ class JobScheduler:
             
             # Skip if no script is defined for this step
             if not script_path:
+                print(f"Warning: No script defined for step '{step_name}', skipping...")
                 continue
                 
             step_output_dir = os.path.join(output_dir, output_subdir)
@@ -911,9 +912,8 @@ class JobScheduler:
             # Extract from scripts section
             workflow_steps = list(self.config['scripts'].keys())
         
-        # Use default steps if none found in config
-        if not workflow_steps:
-            workflow_steps = ['partial_charge', 'simulation', 'analysis']
+        #Raise error if no workflow steps found
+        assert workflow_steps, "No workflow steps defined in configuration"
         
         # Check for latest stage in reverse order (latest to earliest)
         for step in reversed(workflow_steps):
