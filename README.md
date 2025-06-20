@@ -134,6 +134,7 @@ See the example configuration file in `examples/config-coremof-clean.yaml` for a
 - **Database Source**: Local path or URL to download the database
 - **Batch Splitting Strategy**: Choose from alphabetical, size-based, random, or custom_alphabetical
 - **SLURM Settings**: Account, partition, time limits, and other SLURM parameters
+- **Load Dependencies**: Paths to required software dependencies like gRASPA and PACMOF2
 - **Script Paths**: Paths to your custom scripts
 - **Force field and simulation parameters**: Paths to forcefield files and parameters for gRASPA simulations
 - **Job Tracking**: Options for tracking job status and resubmitting failed jobs
@@ -169,18 +170,6 @@ forcefield_files:
 
 All files will be prefixed with `FF_` in the environment variables. The script checks for the mandatory files and will fail if they're missing, while additional molecule-specific files are copied if present.
 
-## gRASPA Executable Configuration
-
-The `mps_run.sh` script can locate the gRASPA executable in two ways:
-
-### Using gRASPA_executable (Recommended)
-Directly specify the full path to the gRASPA executable:
-```yaml
-environment_setup:
-  export gRASPA_executable: "/path/to/gRASPA/nvc_main.x"
-```
-
-Both variables should point directly to the executable file, not just to a directory.
 
 ## Job tracking
 ```csv
