@@ -61,4 +61,5 @@ environment_setup: |
   module load anaconda3_gpu
   source deactivate graspa
   export LD_LIBRARY_PATH=$HOME/software/gcc-13.3.0/lib64:$LD_LIBRARY_PATH
+  export gRASPA_executable=$HOME/software/gRASPA/patch_Allegro/nvc_main.x
   source activate graspa
