@@ -75,25 +75,22 @@ if command -v nvidia-smi &> /dev/null; then
   nvidia-smi --query-gpu=name --format=csv,noheader
 fi
 
-# Set gRASPA binary path based on hostname
-if hostname | grep -q "ncsa"; then
-  gRASPA_DIR=~/software/gRASPA/patch_Allegro
-elif hostname | grep -q "qilin"; then
-  gRASPA_DIR=/data/users/salmanbi/software/gRASPA/patch_Allegro
+# Set gRASPA executable path from environment variables
+if [ -n "$gRASPA_executable" ]; then
+  # If gRASPA_executable is set, use it directly
+  gRASPA_binary="$gRASPA_executable"
 else
-  # Try to find gRASPA in default locations
-  for path in ~/software/gRASPA/*/nvc_main.x /opt/gRASPA/*/nvc_main.x; do
-    if [ -x "$path" ]; then
-      gRASPA_DIR=$(dirname "$path")
-      break
-    fi
-  done
-  
-  if [ -z "$gRASPA_DIR" ]; then
-    echo "❌ Could not find gRASPA binary. Please specify the path manually."
-    exit 1
-  fi
+  echo "❌ Could not find gRASPA executable. Please specify either gRASPA_executable in environment_setup section in config file."
+  exit 1
 fi
+
+# Validate that the gRASPA binary exists and is executable
+if [ ! -f "$gRASPA_binary" ] || [ ! -x "$gRASPA_binary" ]; then
+  echo "❌ gRASPA binary not found or not executable at: $gRASPA_binary"
+  exit 1
+fi
+
+echo "✅ Using gRASPA binary: $gRASPA_binary"
 
 # Check for required auxiliary scripts and copy them from scripts directory
 required_scripts=("start_as_root.sh" "stop_as_root.sh" "update_unit_cells.sh" "mincell.py")
@@ -109,20 +106,33 @@ done
 
 # Copy forcefield files from environment variables
 echo "Copying forcefield files from environment variables..."
-forcefield_vars=(
+
+# Mandatory forcefield files - these must be present
+mandatory_forcefield_vars=(
   "FF_FORCE_FIELD_MIXING_RULES"
   "FF_FORCE_FIELD"
   "FF_PSEUDO_ATOMS"
-  "FF_CO2"
-  "FF_N2"
 )
 
-for var in "${forcefield_vars[@]}"; do
+# Check mandatory forcefield files first
+for var in "${mandatory_forcefield_vars[@]}"; do
   if [ -n "${!var}" ] && [ -f "${!var}" ]; then
-    echo "Copying ${!var}"
+    echo "Copying mandatory file ${!var}"
     cp -v "${!var}" .
   else
-    echo "⚠️ Warning: Forcefield file ${var} (${!var}) not found or path is empty"
+    echo "❌ Error: Mandatory forcefield file ${var} not found or path is empty"
+    exit 1
+  fi
+done
+
+# Copy all additional molecule-specific forcefield files (any environment variable starting with FF_)
+echo "Copying molecule-specific forcefield files..."
+for var in $(env | grep ^FF_ | grep -v "FF_FORCE_FIELD_MIXING_RULES\|FF_FORCE_FIELD\|FF_PSEUDO_ATOMS" | cut -d= -f1); do
+  if [ -n "${!var}" ] && [ -f "${!var}" ]; then
+    echo "Copying ${var} = ${!var}"
+    cp -v "${!var}" .
+  else
+    echo "⚠️ Warning: Optional forcefield file ${var} (${!var}) not found or path is empty"
   fi
 done
 
@@ -201,7 +211,7 @@ for run_name in "${processed_files[@]}"; do
   start_time=$(date +%s)
     
   # Run simulation in the background and log its PID
-  ($gRASPA_DIR/nvc_main.x > result; echo $? > exit_status.log) &
+  ("$gRASPA_binary" > result; echo $? > exit_status.log) &
   pid=$!
   
   # Save the PID and start time for this process
