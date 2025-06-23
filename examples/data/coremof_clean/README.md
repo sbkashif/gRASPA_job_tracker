@@ -2,7 +2,7 @@
 
 The database folder was a modified version of the original [CoRE MOF database](https://pubs.acs.org/doi/10.1021/acs.jced.9b00835). The ions were removed from it.
 
-The cif files will be present in [raw](raw/README.md) folder once you run the `graspa_job_tracker --config examples/config-coremof-clean.yaml --prepare-only` command from the root dir of the repo.
+The cif files will be present in [raw](raw) folder once you run the `graspa_job_tracker --config examples/config-coremof-clean.yaml --prepare-only` command from the root dir of the repo.
 
 # Config file
 
