@@ -106,7 +106,7 @@ graspa_job_tracker --create-default-config my_config.yaml
 
 3. Run the job tracker:
 
-The recommended way to run the job tracker is in two steps. The first step prepares the batches and checks for any issues before submitting jobs. The second step will submit the jobs. The first step is a one-time operation and you can skip it if you are sure that the batches are already prepared.
+The recommended way to run the job tracker is in two steps. The first step prepares the batches and the second step deals with submitting the jobs. The first step is a one-time operation. Hence, you should run this step with --prepare-only option, make sure that the batches are prepared correctly, and then run the second step to submit the jobs which will run the scripts defined in the configuration file.
 
 ```bash
 graspa_job_tracker --config my_config.yaml --prepare-only
@@ -118,6 +118,17 @@ You can also constrain the batches to be considered for submission:
 ```bash
 graspa_job_tracker --config my_config.yaml --min-batch <BATCH_NUMBER> --max-batch <BATCH_NUMBER>
 ```
+Or, run a specific batch:
+
+```bash
+graspa_job_tracker --config my_config.yaml --batch <BATCH_NUMBER>
+```
+
+Or, a specific CIF file:
+
+```bash
+graspa_job_tracker --config my_config.yaml --run-single-cif <CIF_FILE>
+```   
 
 ## Batch Splitting Strategies
 
@@ -126,7 +137,7 @@ The package supports multiple strategies for splitting your database into batche
 - **Alphabetical**: Split files based on alphabetical ordering
 - **Size-based**: Group files based on their size using configurable thresholds
 - **Random**: Randomly assign files to batches
-- **custom_alphabetical**: One-time batch splitting based on alphabetical ordering done gRASPA_job_tracker.script.generate_batches earlier. This was done so that remaining batches can be run in this version of the code without needing to re-run all the batches.
+- **custom_alphabetical**: Following a specific alphabetical ordering implemented in gRASPA_job_tracker.script.generate_batches earlier befor creating this package. We are keeping this as an option since half of the batches reported in the first publication were created using this `generate_batches.sh` script. This is useful for reproducibility and consistency with previous results. For a new simulation, users can just pick `Alphabetical` keyword for batch splitting the CIF files in alphabetical order.
 
 ## Configuration Options
 
@@ -175,16 +186,13 @@ All files will be prefixed with `FF_` in the environment variables. The script c
 ```csv
 (graspa) [sbinkashif@dt-login01 coremof_clean]$ cat job_status.csv 
 batch_id,job_id,status,submission_time,completion_time
-401,8605663,COMPLETED,2025-03-27 12:11:03,2025-03-27 19:30:30
-402,8605664,COMPLETED,2025-03-27 12:11:03,2025-03-27 19:30:30
+batch_id,job_id,status,submission_time,completion_time,workflow_stage
+99,10766406,RUNNING,2025-06-23 03:58:09,,simulation (running)
 ..
-421,8609242,RUNNING,2025-03-27 19:30:30,
-422,8609243,RUNNING,2025-03-27 19:30:30,
-423,8609244,RUNNING,2025-03-27 19:30:30,
-...
-448,8609270,PENDING,2025-03-27 19:30:36,
-449,8609271,PENDING,2025-03-27 19:30:37,
-450,8609272,PENDING,2025-03-27 19:30:37,
+401,8605663,COMPLETED,2025-03-27 17:11:03,2025-03-27 19:30:30,completed
+402,8605664,COMPLETED,2025-03-27 17:11:03,2025-03-27 19:30:30,completed
+..
+568,10766205,PARTIALLY_COMPLETE,2025-06-23 03:06:01,2025-06-23 03:07:01,partially_complete (completed: simulation)
 ```
 
 ## Command Line Options
@@ -201,171 +209,124 @@ python -m gRASPA_job_tracker --update-status
 python -m gRASPA_job_tracker --update-status --batch-range 100-200
 ```
 
-The `--update-status` option scans all batch directories to update the job status tracking file without submitting any new jobs. This is useful for:
-
-- Recovering tracking information after modifying files manually
-- Getting an overview of current job status
-- Updating the status of completed jobs in the background
+The `--update-status` option scans all batch directories to update the job status tracking file without submitting any new jobs. This is useful for checking the status of existing jobs if you have exited from the original `graspa_job_tracker --config my_config.yaml` command while your slurm jobs of individual batches are still running in the background. It will update the `job_status.csv` file with the current status of each batch based on the SLURM job IDs.
 
 ## Creating Custom Scripts
 
-The gRASPA job tracker is designed to be extensible with custom scripts for various stages of the workflow. This section provides guidelines on how to create custom scripts that can work with the configuration system.
+The gRASPA job tracker is designed to be extensible with custom scripts for various stages of the workflow. The job scheduler will generate the SLURM job script and call your script with a standard set of arguments and environment variables. 
+
+An example SLURM job script of a batch can be viewed [here](examples/data/coremof_clean/job_scripts/job_batch_99.sh)
 
 ### General Principles
 
 Custom scripts specified in the `scripts` section of your configuration file can be either Python modules or shell scripts. The system provides multiple ways to access configuration values:
 
-1. **Command Line Arguments**: Values are passed as positional arguments
-2. **Environment Variables**: Values are exported as environment variables 
-3. **Template Files**: Some configuration values are processed into template files. For example, temperature and pressure values need to find a way into the `simulation.input` file for gRASPA.
+1. **Command Line Arguments**: Values are passed as positional arguments.
+2. **Environment Variables**: Values are exported as environment variables (available to all steps).
+3. **Template Files**: Some configuration values are processed into template files. For example, temperature and pressure values may be written into the `simulation.input` file for gRASPA.
 
-### Custom Python Scripts
+### Script Argument Convention
 
-When writing a custom Python script for the job tracker:
+> **IMPORTANT:** The **first argument to all scripts is always `batch_id`**. This is a strict convention for all workflow steps, including custom scripts, analysis, and simulation steps. The order and meaning of subsequent arguments are described below:
 
-1. **Script Placement**: Your Python script should be in a module accessible to the system. You can either:
-   - Put it directly in the `gRASPA_job_tracker/scripts/` directory
-   - Place it anywhere in your Python path and use the full module path in the config
-   
-2. **Configuration Access Methods**:
+- **First Argument (Always):** `batch_id` (string or integer identifying the batch)
+- **Second Argument:** Input directory or file list
+  - **First Step in `scripts` section:** File list of CIF files in the batch. This is just an extra precaution to avoid processing any unnecessary file present in the original database directory.
+  - **Subsequent Steps:** Output directory of the previous step which contains all the output files from the previous step. For example, output directory of partial charge calculation can be used in the gRASPA simulation step.
+- **Third Argument:** Output directory (where your script should write results)
+- **Fourth Argument (Optional):** Template path (if needed by your script). For example, if `<stepname>_input` is defined in `run_file_templates`, then a fourth argument will be passed to your script containing the path to the template file. The script can either use this path directly from arguments or access it via the environment variable `TEMPLATE_<STEP_NAME>_INPUT`.
 
-   a) **Command Line Arguments**: The system passes these standard arguments to your script:
-   ```python
-   # Standard argument pattern
-   batch_id = sys.argv[1]       # First argument is always the batch ID
-   input_file = sys.argv[2]     # Second argument is the input file/directory
-   output_dir = sys.argv[3]     # Third argument is the output directory
-   template_path = sys.argv[4]  # Fourth argument (optional) is the template path
-   ```
+### Accessing Configuration Values
 
-   b) **Environment Variables**: Access configuration values through environment variables:
-   ```python
-   import os
-   
-   # Access a simulation parameter set in config
-   cycles = os.environ.get("SIM_VAR_NumberOfInitializationCycles")
-   
-   # Access a forcefield file path
-   force_field_path = os.environ.get("FF_FORCE_FIELD")
-   ```
-   
-3. **Execution Context**: Your script might be executed with the current working directory set to:
-   - The simulation directory (if `change_dir: true` is set in workflow)
-   - The original directory (default)
+- **Environment Variables**: All configuration values (forcefields, simulation parameters, etc.) are available as environment variables for all steps.
+  - Forcefield files: `FF_<NAME>`
+  - Simulation parameters: `SIM_VAR_<NAME>`
+  - Template files: `TEMPLATE_<NAME>`
+- **Example (Python):**
+  ```python
+  import os
+  cycles = os.environ.get("SIM_VAR_NumberOfInitializationCycles")
+  force_field = os.environ.get("FF_FORCE_FIELD")
+  ```
+- **Example (Bash):**
+  ```bash
+  echo "Force field: ${FF_FORCE_FIELD}"
+  echo "Cycles: ${SIM_VAR_NumberOfInitializationCycles}"
+  ```
 
-4. **Example Custom Python Script** (supports both argument and environment variable access):
-   ```python
-   #!/usr/bin/env python
-   import os
-   import sys
-   
-   def main():
-       # Get values from command line arguments
-       batch_id = sys.argv[1]
-       input_file = sys.argv[2]
-       output_dir = sys.argv[3]
-       
-       # Alternatively, get values from environment variables
-       # batch_id = os.environ.get("BATCH_ID")
-       # input_dir = os.environ.get("INPUT_DIR")
-       
-       # Access simulation parameters from environment variables
-       num_init_cycles = os.environ.get("SIM_VAR_NumberOfInitializationCycles")
-       
-       # Access forcefield files from environment variables
-       force_field = os.environ.get("FF_FORCE_FIELD")
-       co2_forcefield = os.environ.get("FF_CO2")
-       
-       print(f"Processing batch {batch_id}")
-       print(f"Input file/directory: {input_file}")
-       print(f"Output directory: {output_dir}")
-       print(f"Using {num_init_cycles} initialization cycles")
-       print(f"Force field: {force_field}")
-       # Your script logic here
-   
-   if __name__ == "__main__":
-       main()
-   ```
+### Working Directory
 
-### Custom Shell Scripts
+- By default, python scripts are run from their original location.
+- For shell scripts and any step with `change_dir: true`, the script is copied to and run from its output directory.
 
-For shell scripts:
+### Exit Status
 
-1. **Script Placement**: Shell scripts should be executable files. They can be:
-   - Located in the `gRASPA_job_tracker/scripts/` directory
-   - Located anywhere on the system with the full path specified in the config
-   
-2. **Configuration Access Methods**:
+- Your script should exit with code `0` on success.
+- Write an `exit_status.log` file in the output directory if you want the workflow to track completion.
+-  Exit status is used to determine if the job was successful or failed. If your script fails, it should exit with a non-zero code, and the job tracker will mark the job as failed.
 
-   a) **Command Line Arguments**: The system passes standard arguments to your script:
-   ```bash
-   #!/bin/bash
-   
-   # Standard argument pattern
-   batch_id=$1       # First argument is always the batch ID
-   input_file=$2     # Second argument is the input file/directory
-   output_dir=$3     # Third argument is the output directory (optional)
-   scripts_dir=$4    # Fourth argument might be scripts_dir (for mps_run.sh)
-   ```
+### Example Script Skeletons
 
-   b) **Environment Variables**: Access configuration values directly as environment variables:
-   ```bash
-   #!/bin/bash
-   
-   # Access a simulation parameter set in config
-   echo "Using ${SIM_VAR_NumberOfInitializationCycles} initialization cycles"
-   
-   # Access a forcefield file path
-   echo "Force field: ${FF_FORCE_FIELD}"
-   ```
-   
-3. **Special Case - Simulation Scripts**: For scripts like `mps_run.sh`, a special execution pattern is used:
-   ```bash
-   # For simulation scripts (e.g., mps_run.sh)
-   bash mps_run.sh ${batch_id} ${input_dir} ${scripts_dir} ${output_dir}
-   ```
+**Python:**
+```python
+import sys, os
+batch_id = sys.argv[1]
+input_path = sys.argv[2]
+output_dir = sys.argv[3]
+# Optionally: template_path = sys.argv[4]. It is availalable as an environment variable as well with format $TEMPLATE_<STEP_NAME>_INPUT
 
-4. **Example Custom Shell Script**:
-   ```bash
-   #!/bin/bash
-   set -e  # Exit on error
-   
-   # Access command line arguments
-   batch_id=$1
-   input_file=$2
-   output_dir=${3:-.}  # Use current directory if not specified
-   
-   echo "Processing batch ${batch_id}"
-   echo "Input file/directory: ${input_file}"
-   echo "Output directory: ${output_dir}"
-   
-   # Access simulation parameters from environment variables
-   NUM_CYCLES=${SIM_VAR_NumberOfProductionCycles}
-   echo "Using ${NUM_CYCLES} production cycles"
-   
-   # Access forcefield paths from environment variables
-   echo "Force field mixing rules: ${FF_FORCE_FIELD_MIXING_RULES}"
-   echo "Molecule forcefield: ${FF_CO2}"
-   
-   # Your script logic here
-   # ...
-   ```
+# Alternatively, get values from environment variables
+# batch_id = os.environ.get("BATCH_ID")
+# input_dir = os.environ.get("INPUT_DIR")
 
-### Configuration to Script Value Mapping
+# Access simulation parameters from environment variables
+num_init_cycles = os.environ.get("SIM_VAR_NumberOfInitializationCycles")
 
-| Config Section | Access Method | Python Example | Bash Example |
-|----------------|---------------|----------------|--------------|
-| `forcefield_files` | Environment variables with `FF_` prefix | `os.environ.get("FF_FORCE_FIELD")` | `${FF_FORCE_FIELD}` |
-| `run_file_templates.*.variables` | Environment variables with `SIM_VAR_` prefix | `os.environ.get("SIM_VAR_NumberOfInitializationCycles")` | `${SIM_VAR_NumberOfInitializationCycles}` |
-| Script arguments | Command line arguments | `batch_id = sys.argv[1]` | `batch_id=$1` |
-| Template files | Path in command line args or env variable | `template_path = sys.argv[4]` | `$TEMPLATE_SIMULATION_INPUT` |
+# Access forcefield files from environment variables
+force_field = os.environ.get("FF_FORCE_FIELD")
+co2_forcefield = os.environ.get("FF_CO2")
 
-Remember that all environment variables are strings. For numerical values, you'll need to convert them to the appropriate type in your scripts.
+print(f"Processing batch {batch_id}")
+print(f"Input file/directory: {input_file}")
+print(f"Output directory: {output_dir}")
+print(f"Using {num_init_cycles} initialization cycles")
+print(f"Force field: {force_field}")
+# Your script logic here
+```
 
-## Requirements
+**Bash:**
+```bash
+#!/bin/bash
+batch_id=$1
+input_path=$2
+output_dir=$3
+# Optionally: template_path=$4. It is availalable as an environment variable as well with format $TEMPLATE_<STEP_NAME>_INPUT
 
-- Python 3.6+
-- SLURM workload manager
-- PyYAML
-- pandas
-- wget (for downloading databases)
+echo "Processing batch ${batch_id}"
+echo "Input file/directory: ${input_file}"
+echo "Output directory: ${output_dir}"
+
+# Access simulation parameters from environment variables
+NUM_CYCLES=${SIM_VAR_NumberOfProductionCycles}
+echo "Using ${NUM_CYCLES} production cycles"
+
+# Access forcefield paths from environment variables
+echo "Force field mixing rules: ${FF_FORCE_FIELD_MIXING_RULES}"
+echo "Molecule forcefield: ${FF_CO2}"
+
+# Your script logic here
+# ...
+```
+
+### Crux:gRASPA simulation script (`mps_run.sh`)
+- Receives: `batch_id input_dir output_dir`
+- Always run from its output directory
+- Expects environment variables for forcefields, simulation parameters, and template files
+- Writes `exit_status.log` for job tracking
+- Copies required auxiliary scripts like `start_as_root`,`min_cells.py` from `scripts_dir`
+
+### Best Practices
+- Use the standard argument order for all scripts.
+- Use environment variables for all configuration and parameter values.
+- Write results and status files to the output directory provided.
+- For maximum compatibility, document in your script what type of input it expects (file or directory).
