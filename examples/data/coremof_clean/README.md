@@ -12,6 +12,14 @@ Used the config file available [here](../../config-coremof-clean.yaml).
 
 A dedicated CSV file will be available for each batch in the [batches](batches) folder. 
 
+# Simulation run
+
+Simulation was run using the following command:
+
+```bash
+graspa_job_tracker --config examples/config-coremof-clean.yaml --submit-batch 99
+```
+
 # Output files
 
 Output files will be available in the [results](results) folder. The results will be organized in batches, and each batch will have its own subfolder which will correspond to individual steps in `scripts` section of the config file.
