@@ -17,39 +17,29 @@ gRASPA_job_tracker/
 |   ├── batch_manager.py
 |   ├── cli.py
 |   ├── config_parser.py
-|   ├── generate_batches.sh
-|   ├── __init__.py
 |   ├── job_scheduler.py
 |   ├── job_tracker.py
 |   ├── scripts
-|   │   ├── 1-copy_cif_files.sh
-|   │   ├── 2-update_unit_cells.sh
-|   │   ├── analyze_batch_output.py
-|   │   ├── cleanup_results.sh
-|   │   ├── generate_partial_charge.py
-|   │   ├── mincell.py
-|   │   ├── mps_run.sh
-|   │   ├── parse_graspa_output.py
-|   │   ├── start_as_root.sh
-|   │   └── stop_as_root.sh
+|   │   ├── all step-specific main and supporting scripts 
+|   │   └── ...
 |   └── utils.py
 ├── examples/               # Example files
 │   ├── config.yaml         # Example configuration
 │   ├── {PROJECT_NAME}/     # Example data
 │       ├── data/           # Original database files
 │           ├── raw/        # Original database files
-│           ├── batches/    # Processed results
+│           ├── batches/    # Processed results -- List of CIF files in individual batches
 │           │   ├── batch_1.csv
 │           │   ├── batch_2.csv
 │           │   └── ...
-│           ├── job_logs/
-│           ├── job_status.csv # See the [job tracking](#job-tracking) section
-│           ├── job_scripts/
+│           ├── job_logs/ #SLURM output files of each batch
+│           ├── job_status.csv #Job tracking
+│           ├── job_scripts/ #SLURM scripts for each batch
 │           └── results/
 │               ├── batch_1/
-│               │   ├── partial_charges/
-│               │   ├── simulations/
-│               │   └── analysis/
+│               │   ├── partial_charges/ #CIF files with partial charges calculated from PACMOF2
+│               │   ├── simulations/ #gRASPA output files
+│               │   └── analysis/ # CSV file with adsorbate loadings parsed from gRASPA output
 │               ├── batch_2/
 │               ├── batch_3/
 │               └── ...
@@ -62,7 +52,7 @@ gRASPA_job_tracker/
 ├── .gitignore
 ├── LICENSE
 ├── README.md
-├── requirements.txt
+├── environment.yml
 └── setup.py
 ```
 
@@ -93,6 +83,9 @@ pip install -e .
 ## Usage
 
 1. Create a configuration file:
+
+Intial template to work upon can be generated from the following command:
+
 ```bash
 graspa_job_tracker --create-default-config my_config.yaml
 ```
@@ -101,19 +94,21 @@ graspa_job_tracker --create-default-config my_config.yaml
    - Configure database source (local path or URL for download)
    - Set batch splitting strategy (alphabetical, size-based, etc.)
    - Configure your SLURM account settings
-   - Specify paths to your partial charge, simulation, analysis or any intermediate scripts.
-   - Configure forcefield variables (see [Forcefield Configuration](#forcefield-configuration))
+   - Specify paths to your custom scripts. For example, calculating partial charge, running graspa simulation, and analyzing results.
+   - Specify forecfield files and template input files required by custom script. For example, `simulation.input` file template required by gRASPA.
 
 3. Run the job tracker:
 
-The recommended way to run the job tracker is in two steps. The first step prepares the batches and the second step deals with submitting the jobs. The first step is a one-time operation. Hence, you should run this step with --prepare-only option, make sure that the batches are prepared correctly, and then run the second step to submit the jobs which will run the scripts defined in the configuration file.
+The recommended way to run the job tracker is in two steps. The first step is a one-time operation to create batches.Once the first step concludes, make sure that the batches are prepared correctly like achieving target size, sorting, and paths specified to the CIF files. If things look correct, run the second step to submit the jobs. The jobs will run the custom scripts defined in the configuration file for each batch.
 
 ```bash
+#Step 1
 graspa_job_tracker --config my_config.yaml --prepare-only
+#Step 2
 graspa_job_tracker --config my_config.yaml
 ```
 
-You can also constrain the batches to be considered for submission:
+There are many different ways in which Step 2 can be run. You can also constrain the batches to be considered for submission:
 
 ```bash
 graspa_job_tracker --config my_config.yaml --min-batch <BATCH_NUMBER> --max-batch <BATCH_NUMBER>
@@ -121,13 +116,14 @@ graspa_job_tracker --config my_config.yaml --min-batch <BATCH_NUMBER> --max-batc
 Or, run a specific batch:
 
 ```bash
-graspa_job_tracker --config my_config.yaml --batch <BATCH_NUMBER>
+graspa_job_tracker --config my_config.yaml --submit-batch <BATCH_NUMBER>
 ```
 
-Or, a specific CIF file:
+Or, if you have only a few files which doesn't need preparing batches you can run individual files:
 
 ```bash
-graspa_job_tracker --config my_config.yaml --run-single-cif <CIF_FILE>
+graspa_job_tracker --config my_config.yaml --run-single-cif <PATH_TO_CIF_FILE>
+#This functionality is not yet tested
 ```   
 
 ## Batch Splitting Strategies
@@ -137,25 +133,24 @@ The package supports multiple strategies for splitting your database into batche
 - **Alphabetical**: Split files based on alphabetical ordering
 - **Size-based**: Group files based on their size using configurable thresholds
 - **Random**: Randomly assign files to batches
-- **custom_alphabetical**: Following a specific alphabetical ordering implemented in gRASPA_job_tracker.script.generate_batches earlier befor creating this package. We are keeping this as an option since half of the batches reported in the first publication were created using this `generate_batches.sh` script. This is useful for reproducibility and consistency with previous results. For a new simulation, users can just pick `Alphabetical` keyword for batch splitting the CIF files in alphabetical order.
+- **custom_alphabetical**: Following a specific alphabetical ordering implemented in gRASPA\_job\_tracker.script.generate\_batches earlier befor creating this package. We are keeping this as an option since half of the batches reported in the first publication were created using this `generate_batches.sh` script. This is useful for reproducibility and consistency with previous results. For a new simulation, users can just pick `Alphabetical` keyword for batch splitting the CIF files in alphabetical order.
 
 ## Configuration Options
 
 See the example configuration file in `examples/config-coremof-clean.yaml` for a reference. The configuration file allows you to specify:
 - **Database Source**: Local path or URL to download the database
-- **Batch Splitting Strategy**: Choose from alphabetical, size-based, random, or custom_alphabetical
-- **SLURM Settings**: Account, partition, time limits, and other SLURM parameters
+- **Batch Splitting Strategy**: custom\_alphabetical
+- **SLURM Settings**: Account, partition, time limits, and other SLURM parameters as per NCSA cluster
 - **Load Dependencies**: Paths to required software dependencies like gRASPA and PACMOF2
-- **Script Paths**: Paths to your custom scripts
-- **Force field and simulation parameters**: Paths to forcefield files and parameters for gRASPA simulations
-- **Job Tracking**: Options for tracking job status and resubmitting failed jobs
+- **Script Paths**: Paths to your custom scripts: partial charge calculation, gRASPA simulaiton, analysis to parse adsorbate loadings
+- **Force field and simulation parameters**: Paths to forcefield files and template `simulation.input` file for gRASPA simulations, alongside modifications made to simulation parameters in the current run.
 
-## Force field Configuration
+## Force field and simulation paramters
 
-The simulation script (`mps_run.sh`) requires specific environment variables to locate and use forcefield files:
+The simulation script for gRASPA simulations (`mps_run.sh`) requires specific environment variables to locate and use forcefield files:
 
 ### Mandatory Forcefield Files
-These files must be provided in your configuration:
+These files and variables must be provided in your configuration as it is a gRASPA compulsion:
 ```yaml
 forcefield_files:
   FORCE_FIELD_MIXING_RULES: "/path/to/forcefields/force_field_mixing_rules.def"
@@ -166,12 +161,6 @@ forcefield_files:
 ### Molecule-Specific Files
 You can add any number of additional molecule-specific files as needed:
 ```yaml
-forcefield_files:
-  # Mandatory files
-  FORCE_FIELD_MIXING_RULES: "/path/to/forcefields/force_field_mixing_rules.def"
-  FORCE_FIELD: "/path/to/forcefields/force_field.def"
-  PSEUDO_ATOMS: "/path/to/forcefields/pseudo_atoms.def"
-  
   # Molecule-specific files (can add as many as needed)
   CO2: "/path/to/forcefields/CO2.def"
   N2: "/path/to/forcefields/N2.def"
@@ -179,13 +168,16 @@ forcefield_files:
   H2O: "/path/to/forcefields/H2O.def"
 ```
 
-All files will be prefixed with `FF_` in the environment variables. The script checks for the mandatory files and will fail if they're missing, while additional molecule-specific files are copied if present.
+All files will be prefixed with `FF_` in the environment variables during processing. The script checks for the mandatory files and will fail if they're missing, while additional molecule-specific files are copied if present.
 
 
 ## Job tracking
+
+The status on jobs running for individual batches can be tracked in `jobs_status.csv` file which is generated in the ${PROJECT\_ROOT} directory defined in the config file.
+
+### Tracker file
+
 ```csv
-(graspa) [sbinkashif@dt-login01 coremof_clean]$ cat job_status.csv 
-batch_id,job_id,status,submission_time,completion_time
 batch_id,job_id,status,submission_time,completion_time,workflow_stage
 99,10766406,RUNNING,2025-06-23 03:58:09,,simulation (running)
 ..
@@ -195,11 +187,8 @@ batch_id,job_id,status,submission_time,completion_time,workflow_stage
 568,10766205,PARTIALLY_COMPLETE,2025-06-23 03:06:01,2025-06-23 03:07:01,partially_complete (completed: simulation)
 ```
 
-## Command Line Options
 
-...
-
-### Job Status Management
+### Runtime updates in tracker file
 
 ```bash
 # Update job status without submitting new jobs
@@ -209,39 +198,40 @@ python -m gRASPA_job_tracker --update-status
 python -m gRASPA_job_tracker --update-status --batch-range 100-200
 ```
 
-The `--update-status` option scans all batch directories to update the job status tracking file without submitting any new jobs. This is useful for checking the status of existing jobs if you have exited from the original `graspa_job_tracker --config my_config.yaml` command while your slurm jobs of individual batches are still running in the background. It will update the `job_status.csv` file with the current status of each batch based on the SLURM job IDs.
+The `--update-status` option scans all batch directories to update the job status tracking file without submitting any new jobs. This is useful for checking the status of existing jobs if you have exited from the base command: `graspa_job_tracker --config my_config.yaml` or related command used for job submission. If you don't exit the base command after all the batches have been successfully submitted,it will update the `job_status.csv` file every 60 seconds.
 
 ## Creating Custom Scripts
 
 The gRASPA job tracker is designed to be extensible with custom scripts for various stages of the workflow. The job scheduler will generate the SLURM job script and call your script with a standard set of arguments and environment variables. 
 
-An example simulation output is discussed [here](examples/data/coremof_clean/README.md)
+An example simulation output is discussed [here](examples/data/coremof_clean/README.md).
 
 ### General Principles
 
-Custom scripts specified in the `scripts` section of your configuration file can be either Python modules or shell scripts. The system provides multiple ways to access configuration values:
+Custom scripts specified in the `scripts` section of your configuration file can be either Python modules or shell scripts. The system provides multiple ways to access configuration values defined in the [config](examples/config-coremof-clean.yaml) file:
 
-1. **Command Line Arguments**: Values are passed as positional arguments.
-2. **Environment Variables**: Values are exported as environment variables (available to all steps).
-3. **Template Files**: Some configuration values are processed into template files. For example, temperature and pressure values may be written into the `simulation.input` file for gRASPA.
+1. **Environment Variables**: Values are exported as environment variables (available to all steps).
+2. **Template Files**: Some configuration values are processed into template files if those values are to be controlled by a tool-specific file. For example, gRASPA software reads simulation paramter via a `simulation.input` file.
 
 ### Script Argument Convention
 
-> **IMPORTANT:** The **first argument to all scripts is always `batch_id`**. This is a strict convention for all workflow steps, including custom scripts, analysis, and simulation steps. The order and meaning of subsequent arguments are described below:
+The argument convention is enforced from the source code for all custom scripts and the users must follow the convention. The order and meaning of the arguments is described below:
 
-- **First Argument (Always):** `batch_id` (string or integer identifying the batch)
+- **First Argument** `batch_id` (string or integer identifying the batch)
 - **Second Argument:** Input directory or file list
-  - **First Step in `scripts` section:** File list of CIF files in the batch. This is just an extra precaution to avoid processing any unnecessary file present in the original database directory.
+  - **First Step in `scripts` section:** File list of CIF files in the batch. This is just an extra precaution to avoid processing unnecessary file present in the original database directory. The package will automatically create this file which will essentially be a list of CIF files of a batch. The package will also take care of passing the file path as the second argument of the first script. The users would just need to ensure that that they are not trying to access anything else in the second argument.
   - **Subsequent Steps:** Output directory of the previous step which contains all the output files from the previous step. For example, output directory of partial charge calculation can be used in the gRASPA simulation step.
 - **Third Argument:** Output directory (where your script should write results)
-- **Fourth Argument (Optional):** Template path (if needed by your script). For example, if `<stepname>_input` is defined in `run_file_templates`, then a fourth argument will be passed to your script containing the path to the template file. The script can either use this path directly from arguments or access it via the environment variable `TEMPLATE_<STEP_NAME>_INPUT`.
+- **Fourth Argument (Optional):** Template path (if defined in `run_file_templates` corresponding to a given step in `scripts`). For example, if `<stepname>_input` is defined in `run_file_templates`, then a fourth argument will be passed to your script. The argument with be the path to the template file. The script can either use this path directly by accessing fourth argument or access it via the environment variable `TEMPLATE_<STEP_NAME>_INPUT`.
+
+A future update will cover source code modification to allow additional argumnets to the custom `scripts`.
 
 ### Accessing Configuration Values
 
 - **Environment Variables**: All configuration values (forcefields, simulation parameters, etc.) are available as environment variables for all steps.
   - Forcefield files: `FF_<NAME>`
-  - Simulation parameters: `SIM_VAR_<NAME>`
-  - Template files: `TEMPLATE_<NAME>`
+  - Simulation parameters defined in `run_file_templates`: `SIM_VAR_<NAME>`
+  - Template files: `TEMPLATE_<STEP_NAME>_INPUT`
 - **Example (Python):**
   ```python
   import os
@@ -257,13 +247,13 @@ Custom scripts specified in the `scripts` section of your configuration file can
 ### Working Directory
 
 - By default, python scripts are run from their original location.
-- For shell scripts and any step with `change_dir: true`, the script is copied to and run from its output directory.
+- For shell scripts and any step with `change_dir: true`, the script is copied to and run from its output directory. For example, `mps_run.sh` is copied to `simulation` folder and run from there for the setup in [this config file](examples/config-coremof-clean.yaml)
 
 ### Exit Status
 
 - Your script should exit with code `0` on success.
-- Write an `exit_status.log` file in the output directory if you want the workflow to track completion.
--  Exit status is used to determine if the job was successful or failed. If your script fails, it should exit with a non-zero code, and the job tracker will mark the job as failed.
+- Write an `exit_status.log` file in the output directory.
+- Exit status is used to determine if the job was successful or failed. If your script fails, it should exit with a non-zero code, and the job tracker will mark the job as failed.
 
 ### Example Script Skeletons
 
@@ -300,11 +290,12 @@ print(f"Force field: {force_field}")
 batch_id=$1
 input_path=$2
 output_dir=$3
-# Optionally: template_path=$4. It is availalable as an environment variable as well with format $TEMPLATE_<STEP_NAME>_INPUT
+template_path=$4. #It is availalable as an environment variable as well with format $TEMPLATE_<STEP_NAME>_INPUT
 
 echo "Processing batch ${batch_id}"
 echo "Input file/directory: ${input_file}"
 echo "Output directory: ${output_dir}"
+echo "Template file path: ${template_path}"
 
 # Access simulation parameters from environment variables
 NUM_CYCLES=${SIM_VAR_NumberOfProductionCycles}
