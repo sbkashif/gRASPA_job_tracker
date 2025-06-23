@@ -215,7 +215,7 @@ The `--update-status` option scans all batch directories to update the job statu
 
 The gRASPA job tracker is designed to be extensible with custom scripts for various stages of the workflow. The job scheduler will generate the SLURM job script and call your script with a standard set of arguments and environment variables. 
 
-An example SLURM job script of a batch can be viewed [here](examples/data/coremof_clean/job_scripts/job_batch_99.sh)
+An example simulation output is discussed [here](examples/data/coremof_clean/README.md)
 
 ### General Principles
 
