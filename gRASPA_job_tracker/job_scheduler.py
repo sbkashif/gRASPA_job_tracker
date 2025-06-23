@@ -5,6 +5,7 @@ import sys
 from typing import Dict, Any, List, Optional, Callable, Union, Tuple, Set
 import tempfile
 from pathlib import Path
+import importlib.util
 
 class JobScheduler:
     """Handle SLURM job submission and management with support for Python and Bash scripts"""
@@ -102,7 +103,9 @@ class JobScheduler:
             
         return True
     
-    def create_job_script(self, batch_id: int, batch_files: List[str]) -> Optional[str]:
+    def create_job_script(self, 
+                          batch_id: int, 
+                          batch_files: List[str]) -> Optional[str]:
         """
         Create a SLURM job script for processing a batch of CIF files
         
@@ -157,7 +160,10 @@ class JobScheduler:
         
         return script_path
     
-    def _create_default_job_script(self, batch_id: int, batch_files: List[str], batch_output_dir: str) -> str:
+    def _create_default_job_script(self, 
+                                   batch_id: int, 
+                                   batch_files: List[str], 
+                                   batch_output_dir: str) -> str:
         """Create default SLURM job script content with exit status logging."""
         script_content = "#!/bin/bash\n\n"
         
@@ -194,18 +200,18 @@ class JobScheduler:
         if 'environment_setup' in self.config:
             script_content += f"{self.config['environment_setup']}\n\n"
         
-        # Set GRASPA environment variables using project_root from config
-        script_content += f"# Set GRASPA environment variables\n"
+        # # Set GRASPA environment variables using project_root from config
+        # script_content += f"# Set GRASPA environment variables\n"
         
-        # Use project_root directly from config without recalculation
-        project_root = self.config.get('project_root', '')
+        # # Use project_root directly from config without recalculation
+        # project_root = self.config.get('project_root', '')
         
-        # Always set scripts dir to the standard location
-        graspa_scripts_dir = os.path.join(project_root, 'gRASPA_job_tracker', 'scripts')
+        # # Always set scripts dir to the standard location
+        # graspa_scripts_dir = os.path.join(project_root, 'gRASPA_job_tracker', 'scripts')
         
-        # Export the environment variables
-        script_content += f"export GRASPA_SCRIPTS_DIR=\"{graspa_scripts_dir}\"\n"
-        script_content += f"export GRASPA_ROOT=\"{project_root}\"\n\n"
+        # # Export the environment variables
+        # script_content += f"export GRASPA_SCRIPTS_DIR=\"{graspa_scripts_dir}\"\n"
+        # script_content += f"export GRASPA_ROOT=\"{project_root}\"\n\n"
         
         # Extract forcefield paths and set them as environment variables
         script_content += "# Set environment variables for forcefield paths\n"
@@ -255,7 +261,6 @@ class JobScheduler:
     def _generate_workflow_steps(self, batch_id: int, output_dir: str, file_list: str) -> str:
         """Generate workflow steps with exit status logging."""
         steps_content = ""
-        
         # Check if a workflow is defined in the config
         workflow = self.config.get('workflow', None)
         
@@ -274,7 +279,6 @@ class JobScheduler:
         
         # Track the previous step's output directory to use as input for the next step
         prev_step_output_dir = None
-        
         # Process each workflow step in sequence
         for i, step in enumerate(workflow):
             step_name = step.get('name', f'step_{i+1}')
@@ -306,13 +310,23 @@ class JobScheduler:
             steps_content += f"    echo '⚙️ Executing step {step_name}...'\n"
             
             # Special case: Always treat mps_run as a bash script regardless of extension
-            is_bash_script = (script_path.endswith(('.sh', '.bash')) or 
-                             'mps_run' in script_path or 
-                             step_name == 'simulation')
+            # is_bash_script = (script_path.endswith(('.sh', '.bash')) or 
+            #                  'mps_run' in script_path or 
+            #                  step_name == 'simulation')
+            script_file, script_type = resolve_installed_script_and_type(script_path)
             
+            #Determing if the script is a bash script or a Python module
+            #First find the extension from the file path
+            
+            if script_type == 'bash':
+                is_bash_script = True
+            elif script_type == 'python':
+                is_bash_script = False
+            else:
+                raise ValueError(f"Unsupported script type for {script_path}: {script_type}. Should be '.sh' or '.py'.")
             if is_bash_script:
                 steps_content += "    " + self._generate_bash_step(
-                    script_path=script_path,
+                    script_file=script_file,
                     step_name=step_name,
                     batch_id=batch_id,
                     input_file=step_input,  # Use the appropriate input
@@ -336,9 +350,9 @@ class JobScheduler:
             step_var_name = f"{step_name.lower().replace('-', '_')}_status"
             
             # For simulation scripts, use the stored simulation_status variable
-            if step_name == 'simulation' or 'mps_run' in script_path:
-                steps_content += f"    # For simulation steps, use the existing simulation_status variable\n"
-                steps_content += f"    {step_var_name}=$simulation_status\n"
+            if 'mps_run' in script_path:
+                steps_content += f"    # For mps_run script, use the existing simulation_status variable, else $?\n"
+                steps_content += f"    {step_var_name}=${step_var_name}\n"
             else:
                 # For regular scripts, capture exit status as usual
                 steps_content += f"    {step_var_name}=$?\n"
@@ -372,7 +386,7 @@ class JobScheduler:
         
         return steps_content
     
-    def _generate_bash_step(self, script_path: str, step_name: str, batch_id: int, 
+    def _generate_bash_step(self, script_file: str, step_name: str, batch_id: int, 
                            input_file: str, output_dir: str, step: Dict[str, Any],
                            is_first_step: bool = False) -> str:
         """Generate bash script execution commands for a workflow step"""
@@ -385,158 +399,147 @@ class JobScheduler:
             content += f"cp {template_path} {output_dir}/{step_name}.input\n"
         
         # Handle special case for mps_run which may be a Python module path
-        is_module = not ('/' in script_path or script_path.endswith(('.sh', '.bash', '.py')))
+        #is_module = not ('/' in script_path or script_path.endswith(('.sh', '.bash', '.py')))
+        script_path = script_file
         
-        # Special handling for scripts that need to run in their output directory
-        if step.get('change_dir', False) or step_name == 'simulation' or 'mps_run' in script_path:
-            # Handle mps_run specially with a direct path
-            if 'mps_run' in script_path:
-                script_basename = "mps_run.sh"
+        
+        script_basename = os.path.basename(script_path)
+        local_script = f"{step_name}_{script_basename}"
+            
+        # Change to output directory
+        content += f"# Change to output directory\n"
+        content += f"cd {output_dir}\n"
+        
+        # Copy script locally
+        content += f"cp {script_path} ./{local_script}\n"
+        content += f"chmod +x ./{local_script}\n"
+        script_to_run = f"./{local_script}"
+        
+        # Add template path if applicable
+        template_env_var = ""
+        template_file_path = None
+        # Find the template path and set environment variable
+        if 'run_file_templates' in self.config and f'{step_name}_input' in self.config['run_file_templates']:
+            template_config = self.config['run_file_templates'][f'{step_name}_input']
+            if isinstance(template_config, dict) and 'file_path' in template_config:
+                template_file_path = template_config['file_path']
+                step_name_upper = step_name.upper()
+                template_env_var = f"$TEMPLATE_{step_name_upper}_INPUT"
                 
-                # Get the package root directory
-                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                
-                # Construct the direct path to the script
-                scripts_dir = os.path.join(project_root, 'gRASPA_job_tracker', 'scripts')
-                mps_script_path = os.path.join(scripts_dir, script_basename)
-                script_path = mps_script_path
-            else:
-                script_basename = os.path.basename(script_path)
-            
-            local_script = f"{step_name}_{script_basename}"
-            
-            # Change to output directory
-            content += f"# Change to output directory\n"
-            content += f"cd {output_dir}\n"
-            
-            # Copy script locally
-            content += f"cp {script_path} ./{local_script}\n"
-            content += f"chmod +x ./{local_script}\n"
-            script_to_run = f"./{local_script}"
-            
-            # Add template path if applicable
-            template_env_var = ""
-            template_file_path = None
-            # Find the template path and set environment variable
-            if 'run_file_templates' in self.config and 'simulation_input' in self.config['run_file_templates']:
-                template_config = self.config['run_file_templates']['simulation_input']
-                if isinstance(template_config, dict) and 'file_path' in template_config:
-                    template_file_path = template_config['file_path']
-                    template_env_var = "$TEMPLATE_SIMULATION_INPUT"
+                # Generate the template file with variable substitution
+                if template_file_path and os.path.exists(template_file_path) and 'variables' in template_config:
+                    local_template = f"{step_name}_template.input"
+                    content += f"# Copy and modify template with variables\n"
+                    content += f"cp {template_file_path} ./{local_template}\n"
                     
-                    # Generate the template file with variable substitution
-                    if template_file_path and os.path.exists(template_file_path) and 'variables' in template_config:
-                        local_template = f"{step_name}_template.input"
-                        content += f"# Copy and modify template with variables\n"
-                        content += f"cp {template_file_path} ./{local_template}\n"
-                        
-                        # Process each variable with a simpler approach
-                        content += f"# Simple variable replacement for template\n"
-                        for var_key, var_value in template_config['variables'].items():
-                            content += f"if grep -q \"^{var_key}\" ./{local_template}; then\n"
-                            content += f"  # Replace existing variable\n"
-                            content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
-                            content += f"else\n"
-                            content += f"  # Add variable if it doesn't exist\n"
-                            content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
-                            content += f"fi\n"
-                        
-                        # Update the template environment variable to point to the modified local template
-                        content += f"export TEMPLATE_SIMULATION_INPUT=\"$(pwd)/{local_template}\"\n"
-            
-            # Execute with batch_id and appropriate arguments
-            content += f"# Execute script locally\n"
-            
-            # Special handling for mps_run - it expects batch_id, input_dir, output_dir, scripts_dir
-            if 'mps_run' in script_path:
-                # For mps_run, input_file is a directory with CIF files if not first step
-                if not is_first_step:
-                    # When input is a directory containing results from previous step
-                    content += f"# Using previous step output directory as input\n"
+                    # Process each variable with a simpler approach
+                    content += f"# Simple variable replacement for template\n"
+                    for var_key, var_value in template_config['variables'].items():
+                        content += f"if grep -q \"^{var_key}\" ./{local_template}; then\n"
+                        content += f"  # Replace existing variable\n"
+                        content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
+                        content += f"else\n"
+                        content += f"  # Add variable if it doesn't exist\n"
+                        content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
+                        content += f"fi\n"
                     
-                    # Export template as environment variable instead of argument
-                    if template_env_var and not template_file_path:  # Only if we didn't already set it above
-                        content += f"export TEMPLATE_SIMULATION_INPUT={template_env_var}\n"
-                    
-                    # We're already in the output directory, pass batch_id, input_dir, output_dir, scripts_dir
-                    content += f"# Run simulation and IMMEDIATELY capture its exit status\n"
-                    content += f"bash {script_to_run} {batch_id} {input_file} {scripts_dir} .\n"
-                    content += f"simulation_status=$?\n"
-                    
-                    # Store the status for later use before any other commands execute
-                    content += f"# Write exit status to log file immediately\n"
-                    content += f"echo $simulation_status > exit_status.log\n"
-                    
-                else:
-                    # For first step or when input_file is a file list
-                    content += f"# First step: setting up input/output directories\n"
-                    # We're already in the output directory, pass batch_id, input_dir, output_dir, scripts_dir
-                    content += f"bash {script_to_run} {batch_id} {input_file} {scripts_dir} .\n"
-                    content += f"simulation_status=$?\n"
-                    
-                    # Store the status for later use before any other commands execute
-                    content += f"# Write exit status to log file immediately\n"
-                    content += f"echo $simulation_status > exit_status.log\n"
-                    
-                    # Export template as environment variable instead of argument
-                    if template_env_var and not template_file_path:  # Only if we didn't already set it above
-                        content += f"export TEMPLATE_SIMULATION_INPUT={template_env_var}\n"
-                    
-                    # Also provide input file as an environment variable for mps_run
-                    content += f"export MPS_INPUT_FILE=\"{input_file}\"\n"
-            else:
-                # Regular script execution
-                if template_env_var:
-                    content += f"bash {script_to_run} {batch_id} {input_file} {template_env_var}\n"
-                else:
-                    content += f"bash {script_to_run} {batch_id} {input_file}\n"
-            
-            # Capture exit status and clean up on success
-            if 'mps_run' in script_path:
-                # For mps_run scripts, use the already captured simulation_status
-                content += f"script_status=$simulation_status\n"
-            else:
-                # For regular scripts, capture the exit status now
-                content += f"script_status=$?\n"
-                
-            content += f"if [ $script_status -eq 0 ]; then\n"
-            content += f"    # Clean up unnecessary files on success\n"
-            content += f"    rm -f ./{local_script}\n"
-            content += f"fi\n"
-            
-            # Return to original directory and pass through the exit status
-            content += f"cd -\n"
-            
-            # Remove the explicit exit call for mps_run but keep for other scripts
-            # This fixes the premature job termination issue
-            if 'mps_run' in script_path or step_name == 'simulation':
-                # Just return without exit but store the status for the workflow
-                content += f"# Avoid exit for simulation scripts to prevent premature job termination\n"
-                content += f"simulation_status=$script_status\n"
-            else:
-                content += f"exit $script_status\n"
-            
+                    # Update the template environment variable to point to the modified local template
+                    content += f"export TEMPLATE_{step_name_upper}_INPUT=\"$(pwd)/{local_template}\"\n"
+                    # Also provide the path to scripts file since the shell script is copied to run dir
+                    content += f"export {step_name_upper}_SCRIPTS_DIR=\"{os.path.dirname(script_path)}\"\n"
+        
+        # Execute with batch_id and appropriate arguments
+        content += f"# Execute script locally\n"
+        
+        # # Special handling for mps_run - it expects batch_id, input_dir, output_dir, scripts_dir
+        # if 'mps_run' in script_path:
+        #     # For mps_run, input_file is a directory with CIF files if not first step
+        #if not is_first_step:
+        
+        
+        content += f"# Run simulation and IMMEDIATELY capture its exit status\n"
+        if not template_env_var:
+            content += f"bash {script_to_run} {batch_id} {input_file} {output_dir}\n"
         else:
-            # Regular bash script - run from original location
-            # Get additional arguments if specified
-            args = step.get('args', [input_file, output_dir])
+            content += f"bash {script_to_run} {batch_id} {input_file} {output_dir} {template_env_var}\n"
+        content += f"simulation_status=$?\n"
+        
+        # Store the status for later use before any other commands execute
+        content += f"# Write exit status to log file immediately\n"
+        content += f"echo $simulation_status > exit_status.log\n"
             
-            # Add template path if applicable
-            template_key = f"{step_name}_input"
-            template_env_var = None
-            if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
-                template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
-                if isinstance(args, list) and template_env_var not in args:
-                    args.append(template_env_var)
+        # else:
+        #     # For first step or when input_file is a file list
+        #     content += f"# First step: setting up input/output directories\n"
+        #     # We're already in the output directory, pass batch_id, input_dir, output_dir, scripts_dir
+        #     content += f"bash {script_to_run} {batch_id} {input_file} {output_dir}\n"
+        #     content += f"simulation_status=$?\n"
             
-            if isinstance(args, list):
-                args_str = ' '.join([str(arg) for arg in [batch_id] + args])
-            else:
-                args_str = f"{batch_id} {input_file} {output_dir}"
-                if template_env_var:
-                    args_str += f" {template_env_var}"
+        #     # Store the status for later use before any other commands execute
+        #     content += f"# Write exit status to log file immediately\n"
+        #     content += f"echo $simulation_status > exit_status.log\n"
+            
+        #     # Export template as environment variable instead of argument
+        #     if template_env_var and not template_file_path:  # Only if we didn't already set it above
+        #         content += f"export TEMPLATE_SIMULATION_INPUT={template_env_var}\n"
+            
+        #     # Also provide input file as an environment variable for mps_run
+        #     content += f"export MPS_INPUT_FILE=\"{input_file}\"\n"
+        # # else:
+        #     # Regular script execution
+        #     if template_env_var:
+        #         content += f"bash {script_to_run} {batch_id} {input_file} {template_env_var}\n"
+        #     else:
+        #         content += f"bash {script_to_run} {batch_id} {input_file}\n"
+        
+        # # Capture exit status and clean up on success
+        # if 'mps_run' in script_path:
+        #     # For mps_run scripts, use the already captured simulation_status
+        #     content += f"script_status=$simulation_status\n"
+        # else:
+        #     # For regular scripts, capture the exit status now
+        #    content += f"script_status=$?\n"
+        
+        content += f"script_status=$?\n"
+            
+        content += f"if [ $script_status -eq 0 ]; then\n"
+        content += f"    # Clean up unnecessary files on success\n"
+        content += f"    rm -f ./{local_script}\n"
+        content += f"fi\n"
+        
+        # Return to original directory and pass through the exit status
+        content += f"cd -\n"
+        
+        # Remove the explicit exit call for mps_run but keep for other scripts
+        # This fixes the premature job termination issue
+        if 'mps_run' in script_path:
+            # Just return without exit but store the status for the workflow
+            content += f"# Avoid exit for simulation scripts to prevent premature job termination\n"
+            content += f"simulation_status=$script_status\n"
+        else:
+            content += f"exit $script_status\n"
+        
+        # else:
+        #     # Regular bash script - run from original location
+        #     # Get additional arguments if specified
+        #     args = step.get('args', [input_file, output_dir])
+            
+        #     # Add template path if applicable
+        #     template_key = f"{step_name}_input"
+        #     template_env_var = None
+        #     if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
+        #         template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
+        #         if isinstance(args, list) and template_env_var not in args:
+        #             args.append(template_env_var)
+            
+        #     if isinstance(args, list):
+        #         args_str = ' '.join([str(arg) for arg in [batch_id] + args])
+        #     else:
+        #         args_str = f"{batch_id} {input_file} {output_dir}"
+        #         if template_env_var:
+        #             args_str += f" {template_env_var}"
                 
-            content += f"bash {script_path} {args_str}\n"
+        #     content += f"bash {script_path} {args_str}\n"
             
         return content
     
@@ -547,7 +550,7 @@ class JobScheduler:
         content = ""
         
         # Special handling for simulation scripts or those needing to run in output directory
-        if step_name == 'simulation' or step.get('change_dir', False):
+        if step.get('change_dir', False):
             # Get script basename for local copy if it's a file
             if '/' in script_path or script_path.endswith('.py'):
                 script_basename = os.path.basename(script_path)
@@ -1283,3 +1286,35 @@ class JobScheduler:
             print(f"Error checking queue: {e}")
             
         return queue_jobs
+
+def resolve_installed_script_and_type(module_path: str):
+    """
+    Given a module-like path (e.g., 'gRASPA_job_tracker.scripts.mps_run'),
+    find the installed file and determine if it's a Python or shell script.
+    Returns (absolute_path, 'python' or 'shell' or None)
+    """
+    # Get the root package name
+    parts = module_path.split('.')
+    if not parts:
+        return None, None
+
+    # Find the installed location of the root package
+    try:
+        spec = importlib.util.find_spec(parts[0])
+        if not spec or not spec.submodule_search_locations:
+            return None, None
+        package_dir = list(spec.submodule_search_locations)[0]
+    except Exception:
+        return None, None
+
+    # Build the relative path under the package
+    rel_path = os.path.join(*parts[1:])
+    py_path = os.path.join(package_dir, rel_path + '.py')
+    sh_path = os.path.join(package_dir, rel_path + '.sh')
+
+    if os.path.isfile(py_path):
+        return py_path, 'python'
+    elif os.path.isfile(sh_path):
+        return sh_path, 'bash'
+    else:
+        return None, None
