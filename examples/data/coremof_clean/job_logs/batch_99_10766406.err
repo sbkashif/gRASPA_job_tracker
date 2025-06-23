@@ -1,0 +1,4 @@
+A conda environment has been detected CONDA_PREFIX=
+/u/sbinkashif/.conda/envs/graspa 
+anaconda3_gpu is loaded. Consider running conda deactivate and reloading it.
+DeprecationWarning: 'source deactivate' is deprecated. Use 'conda deactivate'.

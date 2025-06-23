@@ -10,7 +10,7 @@ Used the config file available [here](../../config-coremof-clean.yaml).
 
 # Post Batch Preparation
 
-A dedicated CSV file will be available for each batch in the [batches](batches) folder. 
+A dedicated CSV file for each batch created in the [batches](batches) folder. 
 
 # Simulation run
 
@@ -22,11 +22,14 @@ graspa_job_tracker --config examples/config-coremof-clean.yaml --submit-batch 99
 
 # Output files
 
-Output files will be available in the [results](results) folder. The results will be organized in batches, and each batch will have its own subfolder which will correspond to individual steps in `scripts` section of the config file.
+Output files are available in the [results](results) folder. The results folder is organized in batches, and each batch has its own subfolder which will correspond to individual steps in `scripts` section of the config file:
+- [partial_charge](results/batch_99/partial_charge): Contains the output files from the `generate_partial_charge` script.
+- [simulation](results/batch_99/simulation): Contains the output files from the `mps_run` script, which runs the gRASPA simulation.
+- [analysis](results/batch_99/analysis): Contains the output files from the `analyze_batch_output` script, which parse the adsorbate loadings from the simulation output files.
 
-# Sample auto-generated script for a batch
+# Sample auto-generated SLURM script for a batch
 
-A sample script generated for a given batch is available in the [job_scripts](job_scripts) folder. 
+Auto-generated SLURM scripts for each batch are available in the [job_scripts](job_scripts) folder. 
 
 We show an excerpt below. As you can see it will have the sbatch commands as per the `slurm_config` in the config file. Then, it loads the required modules defined in `environment_setup`, and then it goes on to run individual `scripts`. Before running the scripts, it will process all the required variables defined in the `variables` section of the config file.
 
@@ -140,3 +143,8 @@ cd -
 # Write completion status
 echo $? > /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/exit_status.log
 echo 'Job completed at: ' `date`
+
+```
+The sample log file can be found in the [job_logs](job_logs) folder
+- [batch_99_10766406.out](job_logs/batch_99_10766406.out)
+- [batch_99_10766406.err](job_logs/batch_99_10766406.err)

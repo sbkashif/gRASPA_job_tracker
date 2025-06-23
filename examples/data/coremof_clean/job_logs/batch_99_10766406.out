@@ -1,0 +1,501 @@
+Starting job for batch 99 with 20 CIF files
+Job started at:  Sun Jun 22 22:58:45 CDT 2025
+Step 1: Partial Charge
+✓ Step partial_charge already completed successfully, skipping...
+Step 2: Simulation
+⚙️ Executing step simulation...
+Batch ID: 99
+Input directory: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge
+Output directory: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation
+Found 20 CIF structure(s) in the input directory.
+The following structures will be simulated:
+EGATEM_clean_pacmof EGATIQ_clean_pacmof EGATOW_clean_pacmof EGEJOQ_clean_pacmof EGEJUW_clean_pacmof EGIFUV_clean_pacmof EGOXII_clean_pacmof EGOZAB_clean_pacmof EGUNAX_clean_pacmof EHAFEA_clean_pacmof EHAFIE_clean_pacmof EHAFOK_clean_pacmof EHAFUQ_clean_pacmof EHAGAX_clean_pacmof EHAGEB_clean_pacmof EHAGIF_clean_pacmof EHAGOL_clean_pacmof EHAGUR_clean_pacmof EHEKUY_clean_pacmof EHIHEI_clean_pacmof
+Copying cif files...
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EGATEM_clean_pacmof.cif' -> './EGATEM_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EGATIQ_clean_pacmof.cif' -> './EGATIQ_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EGATOW_clean_pacmof.cif' -> './EGATOW_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EGEJOQ_clean_pacmof.cif' -> './EGEJOQ_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EGEJUW_clean_pacmof.cif' -> './EGEJUW_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EGIFUV_clean_pacmof.cif' -> './EGIFUV_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EGOXII_clean_pacmof.cif' -> './EGOXII_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EGOZAB_clean_pacmof.cif' -> './EGOZAB_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EGUNAX_clean_pacmof.cif' -> './EGUNAX_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHAFEA_clean_pacmof.cif' -> './EHAFEA_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHAFIE_clean_pacmof.cif' -> './EHAFIE_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHAFOK_clean_pacmof.cif' -> './EHAFOK_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHAFUQ_clean_pacmof.cif' -> './EHAFUQ_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHAGAX_clean_pacmof.cif' -> './EHAGAX_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHAGEB_clean_pacmof.cif' -> './EHAGEB_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHAGIF_clean_pacmof.cif' -> './EHAGIF_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHAGOL_clean_pacmof.cif' -> './EHAGOL_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHAGUR_clean_pacmof.cif' -> './EHAGUR_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHEKUY_clean_pacmof.cif' -> './EHEKUY_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/partial_charge/EHIHEI_clean_pacmof.cif' -> './EHIHEI_clean_pacmof.cif'
+Starting simulations...
+gpua098.delta.ncsa.illinois.edu
+NVIDIA A100-SXM4-40GB
+✅ Using gRASPA binary: /u/sbinkashif/software/gRASPA/patch_Allegro/nvc_main.x
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/gRASPA_job_tracker/scripts/start_as_root.sh' -> './start_as_root.sh'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/gRASPA_job_tracker/scripts/stop_as_root.sh' -> './stop_as_root.sh'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/gRASPA_job_tracker/scripts/update_unit_cells.sh' -> './update_unit_cells.sh'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/gRASPA_job_tracker/scripts/mincell.py' -> './mincell.py'
+Copying forcefield files from environment variables...
+Copying mandatory file /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/force_field_mixing_rules.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/force_field_mixing_rules.def' -> './force_field_mixing_rules.def'
+Copying mandatory file /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/force_field.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/force_field.def' -> './force_field.def'
+Copying mandatory file /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/pseudo_atoms.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/pseudo_atoms.def' -> './pseudo_atoms.def'
+Copying molecule-specific forcefield files...
+Copying FF_CO2 = /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/CO2.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/CO2.def' -> './CO2.def'
+Copying FF_N2 = /projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/N2.def
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/forcefields/N2-Forcefield/N2.def' -> './N2.def'
+Warning: Failed writing log files to directory [/var/log/nvidia-mps]. No logs will be available.
+Starting simulation EGATEM_clean_pacmof
+'./CO2.def' -> 'EGATEM_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EGATEM_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EGATEM_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EGATEM_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EGATEM_clean_pacmof/pseudo_atoms.def'
+'EGATEM_clean_pacmof.cif' -> 'EGATEM_clean_pacmof/EGATEM_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EGATEM_clean_pacmof/simulation.input'
+Replacing variables in EGATEM_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 2 2 1
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EGATIQ_clean_pacmof
+'./CO2.def' -> 'EGATIQ_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EGATIQ_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EGATIQ_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EGATIQ_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EGATIQ_clean_pacmof/pseudo_atoms.def'
+'EGATIQ_clean_pacmof.cif' -> 'EGATIQ_clean_pacmof/EGATIQ_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EGATIQ_clean_pacmof/simulation.input'
+Replacing variables in EGATIQ_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 2 2 2
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EGATOW_clean_pacmof
+'./CO2.def' -> 'EGATOW_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EGATOW_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EGATOW_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EGATOW_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EGATOW_clean_pacmof/pseudo_atoms.def'
+'EGATOW_clean_pacmof.cif' -> 'EGATOW_clean_pacmof/EGATOW_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EGATOW_clean_pacmof/simulation.input'
+Replacing variables in EGATOW_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 2 2
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EGEJOQ_clean_pacmof
+'./CO2.def' -> 'EGEJOQ_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EGEJOQ_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EGEJOQ_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EGEJOQ_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EGEJOQ_clean_pacmof/pseudo_atoms.def'
+'EGEJOQ_clean_pacmof.cif' -> 'EGEJOQ_clean_pacmof/EGEJOQ_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EGEJOQ_clean_pacmof/simulation.input'
+Replacing variables in EGEJOQ_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 2 2 2
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EGEJUW_clean_pacmof
+'./CO2.def' -> 'EGEJUW_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EGEJUW_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EGEJUW_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EGEJUW_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EGEJUW_clean_pacmof/pseudo_atoms.def'
+'EGEJUW_clean_pacmof.cif' -> 'EGEJUW_clean_pacmof/EGEJUW_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EGEJUW_clean_pacmof/simulation.input'
+Replacing variables in EGEJUW_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 2 2 2
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EGIFUV_clean_pacmof
+'./CO2.def' -> 'EGIFUV_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EGIFUV_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EGIFUV_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EGIFUV_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EGIFUV_clean_pacmof/pseudo_atoms.def'
+'EGIFUV_clean_pacmof.cif' -> 'EGIFUV_clean_pacmof/EGIFUV_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EGIFUV_clean_pacmof/simulation.input'
+Replacing variables in EGIFUV_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 1 1 2
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EGOXII_clean_pacmof
+'./CO2.def' -> 'EGOXII_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EGOXII_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EGOXII_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EGOXII_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EGOXII_clean_pacmof/pseudo_atoms.def'
+'EGOXII_clean_pacmof.cif' -> 'EGOXII_clean_pacmof/EGOXII_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EGOXII_clean_pacmof/simulation.input'
+Replacing variables in EGOXII_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 2 3 2
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EGOZAB_clean_pacmof
+'./CO2.def' -> 'EGOZAB_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EGOZAB_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EGOZAB_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EGOZAB_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EGOZAB_clean_pacmof/pseudo_atoms.def'
+'EGOZAB_clean_pacmof.cif' -> 'EGOZAB_clean_pacmof/EGOZAB_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EGOZAB_clean_pacmof/simulation.input'
+Replacing variables in EGOZAB_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EGUNAX_clean_pacmof
+'./CO2.def' -> 'EGUNAX_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EGUNAX_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EGUNAX_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EGUNAX_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EGUNAX_clean_pacmof/pseudo_atoms.def'
+'EGUNAX_clean_pacmof.cif' -> 'EGUNAX_clean_pacmof/EGUNAX_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EGUNAX_clean_pacmof/simulation.input'
+Replacing variables in EGUNAX_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 2 4 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHAFEA_clean_pacmof
+'./CO2.def' -> 'EHAFEA_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHAFEA_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHAFEA_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHAFEA_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHAFEA_clean_pacmof/pseudo_atoms.def'
+'EHAFEA_clean_pacmof.cif' -> 'EHAFEA_clean_pacmof/EHAFEA_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHAFEA_clean_pacmof/simulation.input'
+Replacing variables in EHAFEA_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHAFIE_clean_pacmof
+'./CO2.def' -> 'EHAFIE_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHAFIE_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHAFIE_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHAFIE_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHAFIE_clean_pacmof/pseudo_atoms.def'
+'EHAFIE_clean_pacmof.cif' -> 'EHAFIE_clean_pacmof/EHAFIE_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHAFIE_clean_pacmof/simulation.input'
+Replacing variables in EHAFIE_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHAFOK_clean_pacmof
+'./CO2.def' -> 'EHAFOK_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHAFOK_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHAFOK_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHAFOK_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHAFOK_clean_pacmof/pseudo_atoms.def'
+'EHAFOK_clean_pacmof.cif' -> 'EHAFOK_clean_pacmof/EHAFOK_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHAFOK_clean_pacmof/simulation.input'
+Replacing variables in EHAFOK_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHAFUQ_clean_pacmof
+'./CO2.def' -> 'EHAFUQ_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHAFUQ_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHAFUQ_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHAFUQ_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHAFUQ_clean_pacmof/pseudo_atoms.def'
+'EHAFUQ_clean_pacmof.cif' -> 'EHAFUQ_clean_pacmof/EHAFUQ_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHAFUQ_clean_pacmof/simulation.input'
+Replacing variables in EHAFUQ_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHAGAX_clean_pacmof
+'./CO2.def' -> 'EHAGAX_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHAGAX_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHAGAX_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHAGAX_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHAGAX_clean_pacmof/pseudo_atoms.def'
+'EHAGAX_clean_pacmof.cif' -> 'EHAGAX_clean_pacmof/EHAGAX_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHAGAX_clean_pacmof/simulation.input'
+Replacing variables in EHAGAX_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHAGEB_clean_pacmof
+'./CO2.def' -> 'EHAGEB_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHAGEB_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHAGEB_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHAGEB_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHAGEB_clean_pacmof/pseudo_atoms.def'
+'EHAGEB_clean_pacmof.cif' -> 'EHAGEB_clean_pacmof/EHAGEB_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHAGEB_clean_pacmof/simulation.input'
+Replacing variables in EHAGEB_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHAGIF_clean_pacmof
+'./CO2.def' -> 'EHAGIF_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHAGIF_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHAGIF_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHAGIF_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHAGIF_clean_pacmof/pseudo_atoms.def'
+'EHAGIF_clean_pacmof.cif' -> 'EHAGIF_clean_pacmof/EHAGIF_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHAGIF_clean_pacmof/simulation.input'
+Replacing variables in EHAGIF_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHAGOL_clean_pacmof
+'./CO2.def' -> 'EHAGOL_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHAGOL_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHAGOL_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHAGOL_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHAGOL_clean_pacmof/pseudo_atoms.def'
+'EHAGOL_clean_pacmof.cif' -> 'EHAGOL_clean_pacmof/EHAGOL_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHAGOL_clean_pacmof/simulation.input'
+Replacing variables in EHAGOL_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHAGUR_clean_pacmof
+'./CO2.def' -> 'EHAGUR_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHAGUR_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHAGUR_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHAGUR_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHAGUR_clean_pacmof/pseudo_atoms.def'
+'EHAGUR_clean_pacmof.cif' -> 'EHAGUR_clean_pacmof/EHAGUR_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHAGUR_clean_pacmof/simulation.input'
+Replacing variables in EHAGUR_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHEKUY_clean_pacmof
+'./CO2.def' -> 'EHEKUY_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHEKUY_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHEKUY_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHEKUY_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHEKUY_clean_pacmof/pseudo_atoms.def'
+'EHEKUY_clean_pacmof.cif' -> 'EHEKUY_clean_pacmof/EHEKUY_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHEKUY_clean_pacmof/simulation.input'
+Replacing variables in EHEKUY_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 2 2 2
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Starting simulation EHIHEI_clean_pacmof
+'./CO2.def' -> 'EHIHEI_clean_pacmof/CO2.def'
+'./force_field.def' -> 'EHIHEI_clean_pacmof/force_field.def'
+'./force_field_mixing_rules.def' -> 'EHIHEI_clean_pacmof/force_field_mixing_rules.def'
+'./N2.def' -> 'EHIHEI_clean_pacmof/N2.def'
+'./pseudo_atoms.def' -> 'EHIHEI_clean_pacmof/pseudo_atoms.def'
+'EHIHEI_clean_pacmof.cif' -> 'EHIHEI_clean_pacmof/EHIHEI_clean_pacmof.cif'
+'/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/simulation/simulation_template.input' -> 'EHIHEI_clean_pacmof/simulation.input'
+Replacing variables in EHIHEI_clean_pacmof/simulation.input...
+Replacing ${NUMBEROFINITIALIZATIONCYCLES} with 2000000
+Replacing ${NUMBEROFPRODUCTIONCYCLES} with 2000000
+Replacing ${MOVIESEVERY} with 3000000
+'../update_unit_cells.sh' -> 'update_unit_cells.sh'
+'../mincell.py' -> './mincell.py'
+Updated simulation.input with UnitCells 0 3 3 3
+removed 'update_unit_cells.sh'
+removed 'mincell.py'
+Simulations completed. Now checking for errors...
+Cleaning up simulation directories...
+Cleaning directory: EGATEM_clean_pacmof
+Cleaning directory: EGATIQ_clean_pacmof
+Cleaning directory: EGATOW_clean_pacmof
+Cleaning directory: EGEJOQ_clean_pacmof
+Cleaning directory: EGEJUW_clean_pacmof
+Cleaning directory: EGIFUV_clean_pacmof
+Cleaning directory: EGOXII_clean_pacmof
+Cleaning directory: EGOZAB_clean_pacmof
+Cleaning directory: EGUNAX_clean_pacmof
+Cleaning directory: EHAFEA_clean_pacmof
+Cleaning directory: EHAFIE_clean_pacmof
+Cleaning directory: EHAFOK_clean_pacmof
+Cleaning directory: EHAFUQ_clean_pacmof
+Cleaning directory: EHAGAX_clean_pacmof
+Cleaning directory: EHAGEB_clean_pacmof
+Cleaning directory: EHAGIF_clean_pacmof
+Cleaning directory: EHAGOL_clean_pacmof
+Cleaning directory: EHAGUR_clean_pacmof
+Cleaning directory: EHEKUY_clean_pacmof
+Cleaning directory: EHIHEI_clean_pacmof
+Cleaning up temporary files...
+removed 'process_times_99.log'
+removed 'CO2.def'
+removed 'force_field.def'
+removed 'force_field_mixing_rules.def'
+removed 'N2.def'
+removed 'pseudo_atoms.def'
+removed 'EGATEM_clean_pacmof.cif'
+removed 'EGATIQ_clean_pacmof.cif'
+removed 'EGATOW_clean_pacmof.cif'
+removed 'EGEJOQ_clean_pacmof.cif'
+removed 'EGEJUW_clean_pacmof.cif'
+removed 'EGIFUV_clean_pacmof.cif'
+removed 'EGOXII_clean_pacmof.cif'
+removed 'EGOZAB_clean_pacmof.cif'
+removed 'EGUNAX_clean_pacmof.cif'
+removed 'EHAFEA_clean_pacmof.cif'
+removed 'EHAFIE_clean_pacmof.cif'
+removed 'EHAFOK_clean_pacmof.cif'
+removed 'EHAFUQ_clean_pacmof.cif'
+removed 'EHAGAX_clean_pacmof.cif'
+removed 'EHAGEB_clean_pacmof.cif'
+removed 'EHAGIF_clean_pacmof.cif'
+removed 'EHAGOL_clean_pacmof.cif'
+removed 'EHAGUR_clean_pacmof.cif'
+removed 'EHEKUY_clean_pacmof.cif'
+removed 'EHIHEI_clean_pacmof.cif'
+removed 'timing_99.log'
+removed 'mincell.py'
+removed 'simulation_mps_run.sh'
+removed 'start_as_root.sh'
+removed 'stop_as_root.sh'
+removed 'update_unit_cells.sh'
+✅ All simulations completed successfully
+/projects/bcvz/sbinkashif/gRASPA_job_tracker/examples
+Simulation step completed. Proceeding to analysis...
+Step 3: Analysis
+⚙️ Executing step analysis...
+▶ Found 20 output files to analyze
+  Processing System_0_EGIFUV_clean_pacmof.cif_1_1_2_298.000000_100000.000000.data...
+  ✓ Successfully processed EGIFUV_clean_pacmof
+  Processing System_0_EGOXII_clean_pacmof.cif_2_3_2_298.000000_100000.000000.data...
+  ✓ Successfully processed EGOXII_clean_pacmof
+  Processing System_0_EHAGUR_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHAGUR_clean_pacmof
+  Processing System_0_EHAGAX_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHAGAX_clean_pacmof
+  Processing System_0_EGUNAX_clean_pacmof.cif_2_4_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EGUNAX_clean_pacmof
+  Processing System_0_EGATEM_clean_pacmof.cif_2_2_1_298.000000_100000.000000.data...
+  ✓ Successfully processed EGATEM_clean_pacmof
+  Processing System_0_EHAFEA_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHAFEA_clean_pacmof
+  Processing System_0_EHAGIF_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHAGIF_clean_pacmof
+  Processing System_0_EHAGEB_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHAGEB_clean_pacmof
+  Processing System_0_EGATIQ_clean_pacmof.cif_2_2_2_298.000000_100000.000000.data...
+  ✓ Successfully processed EGATIQ_clean_pacmof
+  Processing System_0_EGEJOQ_clean_pacmof.cif_2_2_2_298.000000_100000.000000.data...
+  ✓ Successfully processed EGEJOQ_clean_pacmof
+  Processing System_0_EHEKUY_clean_pacmof.cif_2_2_2_298.000000_100000.000000.data...
+  ✓ Successfully processed EHEKUY_clean_pacmof
+  Processing System_0_EHAFOK_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHAFOK_clean_pacmof
+  Processing System_0_EHAGOL_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHAGOL_clean_pacmof
+  Processing System_0_EGOZAB_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EGOZAB_clean_pacmof
+  Processing System_0_EHAFIE_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHAFIE_clean_pacmof
+  Processing System_0_EHAFUQ_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHAFUQ_clean_pacmof
+  Processing System_0_EHIHEI_clean_pacmof.cif_3_3_3_298.000000_100000.000000.data...
+  ✓ Successfully processed EHIHEI_clean_pacmof
+  Processing System_0_EGEJUW_clean_pacmof.cif_2_2_2_298.000000_100000.000000.data...
+  ✓ Successfully processed EGEJUW_clean_pacmof
+  Processing System_0_EGATOW_clean_pacmof.cif_3_2_2_298.000000_100000.000000.data...
+  ✓ Successfully processed EGATOW_clean_pacmof
+✅ Results saved to CSV: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/analysis/batch_99_all_results.csv
+✅ Results saved to JSON: /projects/bcvz/sbinkashif/gRASPA_job_tracker/examples/data/coremof_clean/results/batch_99/analysis/batch_99_all_results.json
+Warning: Could not find batch file for batch 99. Cannot check for missing structures.
+✅ All structures from batch file found in analysis results
+✅ Successfully processed data for 20 out of 20 files
+Job completed at:  Mon Jun 23 00:01:21 CDT 2025
