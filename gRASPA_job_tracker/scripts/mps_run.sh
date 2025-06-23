@@ -6,15 +6,16 @@ if [ "$#" -lt 2 ]; then
   echo "Usage: $0 <batch_id> <input_dir> [output_dir]"
   echo "  batch_id: Batch ID number"
   echo "  input_dir: Directory containing partial charge results"
-  echo "  scripts_dir: Directory containing auxiliary scripts"
   echo "  output_dir: Optional - Output directory for simulation results (defaults to current directory)"
   exit 1
 fi
 
 batch_id=$1
 input_dir=$2
-scripts_dir=$3
-output_dir="${4:-.}"  # Use current directory if not specified
+output_dir="${3:-.}"  # Use current directory if not specified
+
+#Get scripts directory from environment variable
+scripts_dir=$SIMULATION_SCRIPTS_DIR
 
 echo "Batch ID: $batch_id"
 echo "Input directory: $input_dir"
