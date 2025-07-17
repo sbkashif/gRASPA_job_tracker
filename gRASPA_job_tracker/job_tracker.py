@@ -69,19 +69,37 @@ class JobTracker:
             self.job_status = pd.read_csv(self.job_status_file,
                                           parse_dates=['submission_time', 'completion_time'])
         else:
-            self.job_status = pd.DataFrame(columns=[
-                'batch_id', 'job_id', 'status', 'submission_time', 'completion_time', 'workflow_stage'
-            ])
+            # Get base columns (workflow_stage will be added at the end)
+            base_columns = ['batch_id', 'job_id']
+            
+            # Add parameter combination column if parameter matrix is enabled (as 3rd column)
+            if self.job_scheduler.parameter_matrix.is_enabled():
+                base_columns.append('param_combination_id')
+            
+            # Add remaining columns
+            base_columns.extend(['status', 'submission_time', 'completion_time'])
+            
+            # Add workflow_stage at the end
+            base_columns.append('workflow_stage')
+            
+            self.job_status = pd.DataFrame(columns=base_columns)
             self.job_status.to_csv(self.job_status_file, index=False)
-            # Explicitly set the types
-            self.job_status = self.job_status.astype({
+            
+            # Set basic dtypes
+            dtype_dict = {
                 'batch_id': int,
                 'job_id': int,
                 'status': str,
                 'submission_time': 'datetime64[ns]',
                 'completion_time': 'datetime64[ns]',
                 'workflow_stage': str
-            })
+            }
+            
+            # Add parameter combination column dtype if parameter matrix is enabled
+            if self.job_scheduler.parameter_matrix.is_enabled():
+                dtype_dict['param_combination_id'] = str
+            
+            self.job_status = self.job_status.astype(dtype_dict)
         # Initialize failed batches list
         if os.path.exists(self.failed_batches_file):
             with open(self.failed_batches_file, 'r') as f:
@@ -287,6 +305,10 @@ class JobTracker:
             self._save_job_status()
             self._save_failed_batches()
         
+        # Update parameter combination status if parameter matrix is enabled
+        if self.job_scheduler.parameter_matrix.is_enabled():
+            self._update_parameter_combination_status()
+        
         return running_jobs
     
     def _check_partial_completion(self, batch_id: int, batch_output_dir: str) -> str:
@@ -362,6 +384,250 @@ class JobTracker:
             if failed_steps:
                 print(f"Batch {batch_id} failed in steps: {', '.join(failed_steps)}")
             return 'FAILED'
+    
+    def _update_parameter_combination_status(self):
+        """
+        Update the status of individual parameter combinations by checking their output directories
+        """
+        status_changes = False
+        
+        # Get all parameter combination entries (those with param_combination_id)
+        if not self.job_scheduler.parameter_matrix.is_enabled():
+            return
+            
+        param_entries = self.job_status[self.job_status['param_combination_id'].notna()]
+        
+        if param_entries.empty:
+            return
+        
+        for _, param_entry in param_entries.iterrows():
+            batch_id = param_entry['batch_id']
+            current_status = param_entry['status']
+            param_combo_id = param_entry['param_combination_id']
+            
+            # Skip if already completed or failed
+            if current_status in ['COMPLETED', 'FAILED']:
+                continue
+            
+            # Extract parameter ID from param_combination_id (format: B{batch_id}_{param_name})
+            # For example: B1_T298_P100000_CO20.15_N20.85
+            param_name = param_combo_id.split('_', 1)[1]  # Remove B{batch_id}_ prefix
+            
+            # Find matching parameter combination by name
+            param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations()
+            param_combo = None
+            for combo in param_combinations:
+                if combo['name'] == param_name:
+                    param_combo = combo
+                    break
+            
+            if not param_combo:
+                continue
+            
+            param_id = param_combo['param_id']
+            
+            # Get the output directory for this parameter combination
+            sub_job_output_dir = self.job_scheduler.parameter_matrix.get_sub_job_output_dir(batch_id, param_id)
+            
+            if not os.path.exists(sub_job_output_dir):
+                continue
+            
+            # Check exit status file
+            exit_status_file = os.path.join(sub_job_output_dir, 'exit_status.log')
+            new_status = current_status
+            workflow_stage = 'unknown'
+            
+            if os.path.exists(exit_status_file):
+                try:
+                    with open(exit_status_file, 'r') as f:
+                        exit_status = f.read().strip()
+                        if exit_status == '0':
+                            new_status = 'COMPLETED'
+                            workflow_stage = 'completed'
+                        else:
+                            # Check for partial completion
+                            new_status = self._check_parameter_partial_completion(batch_id, param_id, sub_job_output_dir)
+                            if new_status == 'PARTIALLY_COMPLETE':
+                                workflow_stage = 'partially_complete'
+                            else:
+                                new_status = 'FAILED'
+                                workflow_stage = 'failed'
+                except:
+                    new_status = 'FAILED'
+                    workflow_stage = 'failed'
+            else:
+                # Check if job is still running by checking SLURM queue
+                job_id = str(param_entry['job_id'])
+                if job_id != "dry-run" and not job_id.startswith("dry-run-"):
+                    queue_jobs = self.job_scheduler.get_queue_jobs()
+                    if job_id in queue_jobs:
+                        new_status = 'RUNNING'
+                        workflow_stage = 'running'
+                    else:
+                        new_status = 'FAILED'
+                        workflow_stage = 'failed'
+            
+            # Update status if changed
+            if new_status != current_status:
+                # Create mask to find this specific parameter combination
+                mask = (self.job_status['batch_id'] == batch_id) & (self.job_status['job_id'] == param_entry['job_id'])
+                
+                self.job_status.loc[mask, 'status'] = new_status
+                self.job_status.loc[mask, 'workflow_stage'] = workflow_stage
+                
+                if new_status in ['COMPLETED', 'FAILED', 'PARTIALLY_COMPLETE']:
+                    completion_time = self._format_timestamp()
+                    self.job_status.loc[mask, 'completion_time'] = completion_time
+                
+                param_name = param_combo['name']
+                print(f"Parameter combination {param_name} (batch {batch_id}): {current_status} → {new_status}")
+                status_changes = True
+        
+        # Save if any changes were made
+        if status_changes:
+            self._save_job_status()
+    
+    def _check_parameter_partial_completion(self, batch_id: int, param_id: int, sub_job_output_dir: str) -> str:
+        """
+        Check if a parameter combination job was partially completed
+        
+        Args:
+            batch_id: The batch ID
+            param_id: The parameter combination ID
+            sub_job_output_dir: Path to the parameter combination output directory
+            
+        Returns:
+            'PARTIALLY_COMPLETE' if partial completion detected, 'FAILED' otherwise
+        """
+        # Get workflow steps from the config
+        workflow_steps = []
+        
+        if 'workflow' in self.config and self.config['workflow']:
+            workflow_steps = [step.get('name', f'step_{i+1}') for i, step in enumerate(self.config['workflow'])]
+        elif 'scripts' in self.config and self.config['scripts']:
+            workflow_steps = list(self.config['scripts'].keys())
+        
+        if not workflow_steps:
+            return 'FAILED'
+        
+        # Check for completed steps
+        completed_steps = []
+        failed_steps = []
+        
+        for step in workflow_steps:
+            step_dir = os.path.join(sub_job_output_dir, step)
+            exit_status_file = os.path.join(step_dir, 'exit_status.log')
+            
+            if not os.path.exists(step_dir):
+                continue
+                
+            if os.path.exists(exit_status_file):
+                try:
+                    with open(exit_status_file, 'r') as f:
+                        exit_status = f.read().strip()
+                        if exit_status == '0':
+                            completed_steps.append(step)
+                        else:
+                            failed_steps.append(step)
+                except:
+                    failed_steps.append(step)
+            else:
+                failed_steps.append(step)
+        
+        # If any steps completed successfully but not all, consider it partially complete
+        if completed_steps and len(completed_steps) < len(workflow_steps):
+            completion_percentage = (len(completed_steps) / len(workflow_steps)) * 100
+            print(f"Parameter combination {param_id} partially completed {len(completed_steps)}/{len(workflow_steps)} steps ({completion_percentage:.1f}%)")
+            return 'PARTIALLY_COMPLETE'
+        elif len(completed_steps) == len(workflow_steps):
+            return 'COMPLETED'
+        else:
+            return 'FAILED'
+    
+    def get_parameter_matrix_status_summary(self, batch_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get a summary of parameter matrix job status
+        
+        Args:
+            batch_id: Optional batch ID to filter results. If None, returns summary for all batches
+            
+        Returns:
+            Dictionary containing status summary
+        """
+        if not self.job_scheduler.parameter_matrix.is_enabled():
+            return {"error": "Parameter matrix is not enabled"}
+        
+        # Get parameter entries (those with param_combination_id)
+        param_entries = self.job_status[self.job_status['param_combination_id'].notna()]
+        
+        # Filter by batch_id if specified
+        if batch_id is not None:
+            param_entries = param_entries[param_entries['batch_id'] == batch_id]
+        
+        if param_entries.empty:
+            return {"error": "No parameter matrix jobs found"}
+        
+        # Count statuses
+        status_counts = param_entries['status'].value_counts().to_dict()
+        
+        # Get workflow stage counts
+        workflow_stage_counts = param_entries['workflow_stage'].value_counts().to_dict()
+        
+        # Calculate completion percentage
+        total_combinations = len(param_entries)
+        completed_combinations = status_counts.get('COMPLETED', 0)
+        failed_combinations = status_counts.get('FAILED', 0)
+        partial_combinations = status_counts.get('PARTIALLY_COMPLETE', 0)
+        running_combinations = status_counts.get('RUNNING', 0)
+        pending_combinations = status_counts.get('PENDING', 0)
+        
+        completion_percentage = (completed_combinations / total_combinations * 100) if total_combinations > 0 else 0
+        
+        summary = {
+            "total_parameter_combinations": total_combinations,
+            "parameter_columns": list(self.job_scheduler.parameter_matrix.parameters.keys()),
+            "status_breakdown": {
+                "completed": completed_combinations,
+                "failed": failed_combinations,
+                "partially_complete": partial_combinations,
+                "running": running_combinations,
+                "pending": pending_combinations
+            },
+            "workflow_stage_breakdown": workflow_stage_counts,
+            "completion_percentage": round(completion_percentage, 2),
+            "success_rate": round((completed_combinations / total_combinations * 100), 2) if total_combinations > 0 else 0
+        }
+        
+        if batch_id is not None:
+            summary["batch_id"] = batch_id
+            
+            # Add parameter-specific details
+            param_details = []
+            for _, param_entry in param_entries.iterrows():
+                param_detail = {
+                    "job_id": param_entry['job_id'],
+                    "status": param_entry['status'],
+                    "workflow_stage": param_entry['workflow_stage'],
+                    "completion_time": param_entry['completion_time'],
+                    "param_combination_id": param_entry['param_combination_id'],
+                    "parameters": {}
+                }
+                
+                # Parse parameter values from param_combination_id
+                # Format: B{batch_id}_{param_name} 
+                param_name = param_entry['param_combination_id'].split('_', 1)[1]
+                # Find the parameter combination by name
+                param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations()
+                for combo in param_combinations:
+                    if combo['name'] == param_name:
+                        param_detail["parameters"] = combo['parameters']
+                        break
+                
+                param_details.append(param_detail)
+            
+            summary["parameter_details"] = param_details
+        
+        return summary
     
     def _get_next_batch_id(self) -> int:
         """Get the next batch ID to process"""
@@ -673,20 +939,95 @@ class JobTracker:
         
         # Submit the job - pass batch_id to store the relationship
         print(f"Submitting job for batch {next_batch_id} with {len(batch_files)} CIF files...")
-        job_id = self.job_scheduler.submit_job(script_path, dry_run=dry_run, batch_id=next_batch_id)
-        if job_id:
-            # Update job status
-            new_row = {
-                'batch_id': int(next_batch_id),
-                'job_id': int(job_id) if job_id != "dry-run" else "dry-run",
-                'status': 'PENDING' if job_id != "dry-run" else "DRY-RUN",
-                'submission_time': self._format_timestamp(),
-                'completion_time': None,
-                'workflow_stage': 'pending'  # ADDED: Initialize workflow stage
-            }
-            # Create a new DataFrame with the same dtypes as self.job_status
-            new_df = pd.DataFrame([new_row], columns=self.job_status.columns).astype(self.job_status.dtypes)
-            self.job_status = pd.concat([self.job_status, new_df], ignore_index=True)
+        
+        # Check if parameter matrix is enabled
+        if self.job_scheduler.parameter_matrix.is_enabled():
+            # For parameter matrix, submit individual jobs for each parameter combination
+            param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations()
+            
+            print(f"Parameter matrix enabled: submitting {len(param_combinations)} individual jobs")
+            
+            # Create individual job scripts
+            coordinator_script = self.job_scheduler.create_job_script(next_batch_id, batch_files)
+            
+            # Submit individual jobs for each parameter combination  
+            submitted_jobs = []
+            for param_combo in param_combinations:
+                param_id = param_combo['param_id']
+                param_name = param_combo['name']
+                
+                # Create individual job script path
+                param_script_path = os.path.join(
+                    self.job_scheduler.scripts_dir, 
+                    f'job_batch_{next_batch_id}_param_{param_id}.sh'
+                )
+                
+                # Submit individual parameter job
+                print(f"Submitting parameter combination {param_id}: {param_name}")
+                param_job_id = self.job_scheduler.submit_job(param_script_path, dry_run=dry_run, batch_id=next_batch_id)
+                
+                if param_job_id:
+                    submitted_jobs.append((param_job_id, param_combo))
+                    
+                    # Create parameter combination ID with batch prefix
+                    param_combo_id = self.job_scheduler.parameter_matrix.get_sub_job_name(next_batch_id, param_id)
+                    
+                    # Create base job status entry with parameter combination ID
+                    param_row = {
+                        'batch_id': int(next_batch_id),
+                        'job_id': int(param_job_id) if param_job_id != "dry-run" else f"dry-run-{param_id}",
+                        'param_combination_id': param_combo_id,
+                        'status': 'PENDING' if param_job_id != "dry-run" else "DRY-RUN",
+                        'submission_time': self._format_timestamp(),
+                        'completion_time': None,
+                        'workflow_stage': 'pending'
+                    }
+                    
+                    # Ensure all columns exist and fill missing ones with None
+                    for col in self.job_status.columns:
+                        if col not in param_row:
+                            param_row[col] = None
+                    
+                    param_df = pd.DataFrame([param_row], columns=self.job_status.columns)
+                    self.job_status = pd.concat([self.job_status, param_df], ignore_index=True)
+                else:
+                    print(f"⚠️ Failed to submit parameter combination {param_id}")
+            
+            success = len(submitted_jobs) > 0
+            if success:
+                print(f"✓ Submitted {len(submitted_jobs)} parameter combination jobs for batch {next_batch_id}")
+            else:
+                print(f"⚠️ No parameter jobs were submitted for batch {next_batch_id}")
+            
+        else:
+            # Standard single job submission
+            job_id = self.job_scheduler.submit_job(script_path, dry_run=dry_run, batch_id=next_batch_id)
+            if job_id:
+                # Standard single job entry
+                new_row = {
+                    'batch_id': int(next_batch_id),
+                    'job_id': int(job_id) if job_id != "dry-run" else "dry-run",
+                    'status': 'PENDING' if job_id != "dry-run" else "DRY-RUN",
+                    'submission_time': self._format_timestamp(),
+                    'completion_time': None,
+                    'workflow_stage': 'pending'
+                }
+                
+                # Fill missing columns with None for single job
+                for col in self.job_status.columns:
+                    if col not in new_row:
+                        new_row[col] = None
+                
+                new_df = pd.DataFrame([new_row], columns=self.job_status.columns)
+                self.job_status = pd.concat([self.job_status, new_df], ignore_index=True)
+                
+                print(f"✓ Submitted job for batch {next_batch_id} with job ID {job_id}")
+                success = True
+            else:
+                print(f"⚠️ Failed to submit job for batch {next_batch_id}")
+                success = False
+        
+        if success:
             self._save_job_status()
             
             # Remove batch from failed batches if it was a retry
@@ -695,10 +1036,8 @@ class JobTracker:
                 self.failed_batches.remove(next_batch_id)
                 self._save_failed_batches()
             
-            print(f"✓ Submitted job for batch {next_batch_id} with job ID {job_id}")
             return True
         else:
-            print(f"⚠️ Failed to submit job for batch {next_batch_id}")
             return False
     
     def clean_job_status(self):

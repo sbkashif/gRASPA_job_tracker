@@ -2,6 +2,7 @@ import os
 import yaml
 import shutil
 import subprocess
+import importlib.util
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -170,3 +171,36 @@ def create_project_structure(base_dir: str, project_name: str) -> Dict[str, str]
     print(f"Created default config: {config_path}")
     
     return paths
+
+
+def resolve_installed_script_and_type(module_path: str):
+    """
+    Given a module-like path (e.g., 'gRASPA_job_tracker.scripts.mps_run'),
+    find the installed file and determine if it's a Python or shell script.
+    Returns (absolute_path, 'python' or 'shell' or None)
+    """
+    # Get the root package name
+    parts = module_path.split('.')
+    if not parts:
+        return None, None
+
+    # Find the installed location of the root package
+    try:
+        spec = importlib.util.find_spec(parts[0])
+        if not spec or not spec.submodule_search_locations:
+            return None, None
+        package_dir = list(spec.submodule_search_locations)[0]
+    except Exception:
+        return None, None
+
+    # Build the relative path under the package
+    rel_path = os.path.join(*parts[1:])
+    py_path = os.path.join(package_dir, rel_path + '.py')
+    sh_path = os.path.join(package_dir, rel_path + '.sh')
+
+    if os.path.isfile(py_path):
+        return py_path, 'python'
+    elif os.path.isfile(sh_path):
+        return sh_path, 'bash'
+    else:
+        return None, None

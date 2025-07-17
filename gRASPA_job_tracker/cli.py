@@ -193,6 +193,12 @@ def main():
     parser.add_argument('--analyze-batch-range', action='store_true',
                         help='Analyze output for a range of batches (requires --min-batch and --max-batch)')
     
+    # Add parameter matrix status option
+    parser.add_argument('--parameter-matrix-status', action='store_true',
+                        help='Show parameter matrix job status summary')
+    parser.add_argument('--parameter-matrix-batch', type=int,
+                        help='Show parameter matrix status for a specific batch (requires --parameter-matrix-status)')
+    
     # Add test option
     parser.add_argument('--test', '-t', action='store_true', 
                         help='Run tests for batch results')
@@ -492,6 +498,60 @@ def main():
                 if os.environ.get("DEBUG"):
                     traceback.print_exc()
                 sys.exit(1)
+            
+            return
+        
+        # Handle parameter matrix status option
+        if args.parameter_matrix_status:
+            print("=== Parameter Matrix Status Summary ===")
+            
+            # Load and validate configuration
+            config_parser = ConfigParser(args.config)
+            config = config_parser.get_config()
+            
+            # Initialize job tracker
+            job_tracker = JobTracker(config)
+            
+            # Get parameter matrix status summary
+            batch_id = args.parameter_matrix_batch if args.parameter_matrix_batch else None
+            summary = job_tracker.get_parameter_matrix_status_summary(batch_id)
+            
+            if "error" in summary:
+                print(f"⚠️ ERROR: {summary['error']}")
+                sys.exit(1)
+            
+            # Display summary
+            if batch_id:
+                print(f"Parameter Matrix Status for Batch {batch_id}:")
+            else:
+                print("Parameter Matrix Status Summary (All Batches):")
+            
+            print(f"  Total parameter combinations: {summary['total_parameter_combinations']}")
+            print(f"  Parameter columns: {', '.join(summary['parameter_columns'])}")
+            print(f"  Completion percentage: {summary['completion_percentage']}%")
+            print(f"  Success rate: {summary['success_rate']}%")
+            
+            print("\nStatus breakdown:")
+            for status, count in summary['status_breakdown'].items():
+                print(f"  - {status.upper()}: {count}")
+            
+            if summary['workflow_stage_breakdown']:
+                print("\nWorkflow stage breakdown:")
+                for stage, count in summary['workflow_stage_breakdown'].items():
+                    print(f"  - {stage}: {count}")
+            
+            # Show parameter details for specific batch
+            if batch_id and 'parameter_details' in summary:
+                print(f"\nParameter combination details for batch {batch_id}:")
+                for param_detail in summary['parameter_details']:
+                    status_icon = "✅" if param_detail['status'] == 'COMPLETED' else "❌" if param_detail['status'] == 'FAILED' else "⚠️" if param_detail['status'] == 'PARTIALLY_COMPLETE' else "⏳"
+                    
+                    # Create readable parameter string
+                    param_str = ", ".join([f"{k}={v}" for k, v in param_detail['parameters'].items()])
+                    
+                    print(f"  {status_icon} Job {param_detail['job_id']}: {param_str} ({param_detail['status']})")
+                    if param_detail['completion_time']:
+                        print(f"      Completed: {param_detail['completion_time']}")
             
             return
         

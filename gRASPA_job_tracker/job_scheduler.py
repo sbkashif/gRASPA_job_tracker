@@ -2,10 +2,12 @@ import os
 import subprocess
 import importlib
 import sys
+import re
 from typing import Dict, Any, List, Optional, Callable, Union, Tuple, Set
 import tempfile
 from pathlib import Path
 import importlib.util
+from .parameter_matrix import ParameterMatrix
 
 class JobScheduler:
     """Handle SLURM job submission and management with support for Python and Bash scripts"""
@@ -28,7 +30,7 @@ class JobScheduler:
         
         # Scripts and templates
         self.scripts = config.get('scripts', {})
-        self.templates = config.get('file_templates', {})
+        self.templates = config.get('run_file_templates', {})
         
         # Create directories for job scripts and logs
         os.makedirs(self.scripts_dir, exist_ok=True)
@@ -40,6 +42,9 @@ class JobScheduler:
         if batch_range:
             self.min_batch_id, self.max_batch_id = batch_range
             
+        # Initialize parameter matrix for multi-layered job allocation
+        self.parameter_matrix = ParameterMatrix(config)
+        
         # Dictionary to track batch_id to job_id mapping
         self.batch_job_map = {}
         
@@ -107,7 +112,8 @@ class JobScheduler:
                           batch_id: int, 
                           batch_files: List[str]) -> Optional[str]:
         """
-        Create a SLURM job script for processing a batch of CIF files
+        Create a SLURM job script for processing a batch of CIF files.
+        If parameter matrix is enabled, creates a script that launches multiple sub-jobs.
         
         Args:
             batch_id: ID of the batch
@@ -124,6 +130,25 @@ class JobScheduler:
             print(f"Skipping batch {batch_id}: outside specified batch range")
             return None
         
+        # Check if parameter matrix is enabled
+        if self.parameter_matrix.is_enabled():
+            return self._create_parameter_matrix_job_script(batch_id, batch_files)
+        else:
+            return self._create_single_job_script(batch_id, batch_files)
+    
+    def _create_single_job_script(self, 
+                                  batch_id: int, 
+                                  batch_files: List[str]) -> str:
+        """
+        Create a single job script (original behavior)
+        
+        Args:
+            batch_id: ID of the batch
+            batch_files: List of CIF file paths in the batch
+            
+        Returns:
+            Path to the created job script
+        """
         script_path = os.path.join(self.scripts_dir, f'job_batch_{batch_id}.sh')
         
         # Ensure batch_files are all strings
@@ -150,6 +175,662 @@ class JobScheduler:
         else:
             # Create default script content
             script_content = self._create_default_job_script(batch_id, batch_files, batch_output_dir)
+        
+        # Write script to file
+        with open(script_path, 'w') as f:
+            f.write(script_content)
+        
+        # Make script executable
+        os.chmod(script_path, 0o755)
+        
+        return script_path
+    
+    def _create_parameter_matrix_job_script(self, 
+                                           batch_id: int, 
+                                           batch_files: List[str]) -> str:
+        """
+        Create individual job scripts for each parameter combination instead of one multi-node job
+        
+        Args:
+            batch_id: ID of the batch
+            batch_files: List of CIF file paths in the batch
+            
+        Returns:
+            Path to the coordinator script (for backward compatibility)
+        """
+        # Get parameter combinations
+        param_combinations = self.parameter_matrix.get_parameter_combinations()
+        
+        # Create individual job scripts for each parameter combination
+        job_scripts = []
+        for param_combo in param_combinations:
+            param_id = param_combo['param_id']
+            param_name = param_combo['name']
+            
+            # Create individual job script for this parameter combination
+            script_path = self._create_individual_parameter_job_script(batch_id, batch_files, param_combo)
+            job_scripts.append(script_path)
+        
+        # Create a coordinator script that submits all parameter jobs
+        coordinator_script = self._create_parameter_coordinator_script(batch_id, job_scripts, param_combinations)
+        
+        return coordinator_script
+    
+    def _create_individual_parameter_job_script(self, 
+                                              batch_id: int, 
+                                              batch_files: List[str], 
+                                              param_combo: Dict[str, Any]) -> str:
+        """
+        Create a job script for a single parameter combination
+        
+        Args:
+            batch_id: ID of the batch
+            batch_files: List of CIF file paths in the batch
+            param_combo: Parameter combination dictionary
+            
+        Returns:
+            Path to the created job script
+        """
+        param_id = param_combo['param_id']
+        param_name = param_combo['name']
+        
+        # Create script path
+        script_path = os.path.join(self.scripts_dir, f'job_batch_{batch_id}_param_{param_id}.sh')
+        
+        # Create job script content
+        script_content = "#!/bin/bash\n\n"
+        
+        # Add SLURM directives for individual parameter job
+        script_content += f"#SBATCH --job-name=g_{batch_id}_p{param_id}\n"
+        script_content += f"#SBATCH -o {os.path.join(self.logs_dir, f'batch_{batch_id}_param_{param_id}_%j.out')}\n"
+        script_content += f"#SBATCH -e {os.path.join(self.logs_dir, f'batch_{batch_id}_param_{param_id}_%j.err')}\n"
+        script_content += f"#SBATCH --nodes=1\n"
+        script_content += f"#SBATCH --ntasks-per-node=1\n"
+        script_content += f"#SBATCH --cpus-per-task={len(batch_files)}\n"
+        
+        # Add custom SLURM configuration
+        for key, value in self.slurm_config.items():
+            if key == 'time' and isinstance(value, (int, float)) and not isinstance(value, str):
+                hours, remainder = divmod(int(value), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                formatted_time = f"{hours}:{minutes:02d}:{seconds:02d}"
+                script_content += f"#SBATCH --{key}={formatted_time}\n"
+            else:
+                script_content += f"#SBATCH --{key}={value}\n"
+        
+        script_content += "\n"
+        
+        # Add environment setup if provided
+        if 'environment_setup' in self.config:
+            script_content += f"{self.config['environment_setup']}\n\n"
+        
+        # Export environment variables for forcefields
+        script_content += "# Set environment variables for forcefield paths\n"
+        forcefield_files = self.config.get('forcefield_files', {})
+        for key, path in forcefield_files.items():
+            script_content += f"export FF_{key.upper()}=\"{path}\"\n"
+        
+        # Export template files and variables
+        script_content += "\n# Handle simulation template and variables\n"
+        if 'run_file_templates' in self.config:
+            for key, template_config in self.config['run_file_templates'].items():
+                if isinstance(template_config, dict):
+                    file_path = template_config.get('file_path', '')
+                    if file_path and os.path.exists(file_path):
+                        script_content += f"export TEMPLATE_{key.upper()}=\"{file_path}\"\n"
+                    
+                    if 'variables' in template_config:
+                        for var_key, var_value in template_config['variables'].items():
+                            script_content += f"export SIM_VAR_{var_key.upper()}=\"{var_value}\"\n"
+        
+        # Export parameter-specific environment variables
+        script_content += f"\n# Parameter combination {param_id}: {param_name}\n"
+        script_content += f"export PARAM_ID={param_id}\n"
+        script_content += f"export PARAM_NAME='{param_name}'\n"
+        
+        # Export parameter values as SIM_VAR_ environment variables (same format as template variables)
+        parameters = param_combo['parameters']
+        for param_key, param_value in parameters.items():
+            # Export as both PARAM_ (for backward compatibility) and SIM_VAR_ (for template processing)
+            script_content += f"export PARAM_{param_key.upper()}={param_value}\n"
+            script_content += f"export SIM_VAR_{param_key.upper()}=\"{param_value}\"\n"
+        
+        script_content += "\n"
+        
+        # Get sub-job output directory
+        sub_job_output_dir = self.parameter_matrix.get_sub_job_output_dir(batch_id, param_id)
+        
+        # Create output directory and batch list file
+        script_content += f"# Create output directory for parameter combination {param_id}\n"
+        script_content += f"mkdir -p {sub_job_output_dir}\n"
+        script_content += f"cd {sub_job_output_dir}\n\n"
+        
+        # Create parameter-specific batch list file
+        param_batch_list = os.path.join(sub_job_output_dir, "cif_file_list.txt")
+        script_content += f"# Create list of CIF files for this parameter combination\n"
+        script_content += f"cat > {param_batch_list} << 'EOF'\n"
+        for cif_file in batch_files:
+            script_content += f"{cif_file}\n"
+        script_content += "EOF\n\n"
+        
+        # Generate workflow steps for this parameter combination
+        workflow_steps = self._generate_parameter_workflow_steps(batch_id, param_id, sub_job_output_dir, param_batch_list)
+        
+        # Add workflow steps
+        script_content += f"# Execute workflow for parameter combination {param_id}\n"
+        script_content += f"echo 'Starting parameter combination {param_id}: {param_name}'\n"
+        script_content += f"echo 'Job started at: ' `date`\n\n"
+        
+        script_content += workflow_steps
+        
+        # Write final exit status
+        script_content += f"\n# Write final exit status\n"
+        script_content += f"echo $? > {os.path.join(sub_job_output_dir, 'exit_status.log')}\n"
+        script_content += f"echo 'Parameter combination {param_id} completed at: ' `date`\n"
+        
+        # Write script to file
+        with open(script_path, 'w') as f:
+            f.write(script_content)
+        
+        # Make script executable
+        os.chmod(script_path, 0o755)
+        
+        return script_path
+    
+    def _create_parameter_coordinator_script(self, 
+                                           batch_id: int, 
+                                           job_scripts: List[str], 
+                                           param_combinations: List[Dict[str, Any]]) -> str:
+        """
+        Create a coordinator script that submits all parameter combination jobs
+        
+        Args:
+            batch_id: ID of the batch
+            job_scripts: List of job script paths for each parameter combination
+            param_combinations: List of parameter combinations
+            
+        Returns:
+            Path to the coordinator script
+        """
+        coordinator_script = os.path.join(self.scripts_dir, f'job_batch_{batch_id}_coordinator.sh')
+        
+        script_content = "#!/bin/bash\n\n"
+        script_content += f"# Parameter Matrix Coordinator for Batch {batch_id}\n"
+        script_content += f"# This script submits individual SLURM jobs for each parameter combination\n\n"
+        
+        script_content += f"echo 'Starting parameter matrix coordinator for batch {batch_id}'\n"
+        script_content += f"echo 'Submitting {len(param_combinations)} parameter combination jobs'\n\n"
+        
+        # Array to store job IDs
+        script_content += "declare -a PARAM_JOB_IDS\n\n"
+        
+        # Submit each parameter combination job
+        for i, (script_path, param_combo) in enumerate(zip(job_scripts, param_combinations)):
+            param_id = param_combo['param_id']
+            param_name = param_combo['name']
+            
+            script_content += f"# Submit parameter combination {param_id}: {param_name}\n"
+            script_content += f"echo 'Submitting parameter combination {param_id}: {param_name}'\n"
+            script_content += f"JOB_ID=$(sbatch --parsable {script_path})\n"
+            script_content += f"PARAM_JOB_IDS[{i}]=$JOB_ID\n"
+            script_content += f"echo 'Parameter combination {param_id} submitted with job ID: $JOB_ID'\n\n"
+        
+        # Report submitted job IDs
+        script_content += "echo 'All parameter combination jobs submitted:'\n"
+        script_content += "for i in \"${!PARAM_JOB_IDS[@]}\"; do\n"
+        script_content += "    echo \"  Parameter combination $i: Job ID ${PARAM_JOB_IDS[$i]}\"\n"
+        script_content += "done\n\n"
+        
+        script_content += "echo 'Parameter matrix coordinator completed'\n"
+        script_content += "echo 'Use squeue to monitor individual parameter jobs'\n"
+        
+        # Write script to file
+        with open(coordinator_script, 'w') as f:
+            f.write(script_content)
+        
+        # Make script executable
+        os.chmod(coordinator_script, 0o755)
+        
+        return coordinator_script
+    
+    def _create_parameter_matrix_script_content(self, 
+                                               batch_id: int, 
+                                               batch_files: List[str], 
+                                               param_combinations: List[Dict[str, Any]]) -> str:
+        """
+        Create script content for parameter matrix job that launches multiple sub-jobs
+        
+        Args:
+            batch_id: ID of the batch
+            batch_files: List of CIF file paths in the batch
+            param_combinations: List of parameter combinations
+            
+        Returns:
+            Script content string
+        """
+        script_content = "#!/bin/bash\n\n"
+        
+        # Get the number of parameter combinations
+        num_combinations = len(param_combinations)
+        
+        # Add SLURM directives for the main job
+        script_content += f"#SBATCH --job-name=g_{batch_id}_matrix\n"
+        script_content += f"#SBATCH -o {os.path.join(self.logs_dir, f'batch_{batch_id}_matrix_%j.out')}\n"
+        script_content += f"#SBATCH -e {os.path.join(self.logs_dir, f'batch_{batch_id}_matrix_%j.err')}\n"
+        script_content += f"#SBATCH --nodes={num_combinations}\n"
+        script_content += f"#SBATCH --ntasks-per-node=1\n"
+        script_content += f"#SBATCH --cpus-per-task={len(batch_files)}\n"
+        script_content += f"#SBATCH --gpus-per-node=1\n"
+        script_content += f"#SBATCH --gpu-bind=closest\n"
+        script_content += f"#SBATCH --no-requeue\n"
+        script_content += "\n"
+        
+        # Add custom SLURM configuration
+        for key, value in self.slurm_config.items():
+            if key == 'time' and isinstance(value, (int, float)) and not isinstance(value, str):
+                hours, remainder = divmod(int(value), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                formatted_time = f"{hours}:{minutes:02d}:{seconds:02d}"
+                script_content += f"#SBATCH --{key}={formatted_time}\n"
+            else:
+                script_content += f"#SBATCH --{key}={value}\n"
+        
+        script_content += "\n"
+        
+        # Add environment setup if provided
+        if 'environment_setup' in self.config:
+            script_content += f"{self.config['environment_setup']}\n\n"
+        
+        # Export environment variables for forcefields
+        script_content += "# Set environment variables for forcefield paths\n"
+        forcefield_files = self.config.get('forcefield_files', {})
+        for key, path in forcefield_files.items():
+            script_content += f"export FF_{key.upper()}=\"{path}\"\n"
+        
+        # Export template files
+        script_content += "\n# Handle simulation template and variables\n"
+        if 'run_file_templates' in self.config:
+            for key, template_config in self.config['run_file_templates'].items():
+                if isinstance(template_config, dict):
+                    file_path = template_config.get('file_path', '')
+                    if file_path and os.path.exists(file_path):
+                        script_content += f"export TEMPLATE_{key.upper()}=\"{file_path}\"\n"
+                    
+                    if 'variables' in template_config:
+                        for var_key, var_value in template_config['variables'].items():
+                            script_content += f"export SIM_VAR_{var_key.upper()}=\"{var_value}\"\n"
+        
+        script_content += "\n"
+        
+        # Create main batch list file
+        main_batch_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
+        os.makedirs(main_batch_dir, exist_ok=True)
+        batch_list_file = os.path.join(main_batch_dir, "cif_file_list.txt")
+        
+        script_content += f"# Create list of CIF files for this batch\n"
+        script_content += f"cat > {batch_list_file} << 'EOF'\n"
+        for cif_file in batch_files:
+            script_content += f"{cif_file}\n"
+        script_content += "EOF\n\n"
+        
+        # Launch sub-jobs for each parameter combination
+        script_content += f"echo 'Starting parameter matrix job for batch {batch_id} with {num_combinations} parameter combinations'\n"
+        script_content += "echo 'Job started at: ' `date`\n\n"
+        
+        # Array to store background process IDs
+        script_content += "declare -a SUB_PIDS\n\n"
+        
+        # Launch each parameter combination as a separate process
+        for i, param_combo in enumerate(param_combinations):
+            param_id = param_combo['param_id']
+            param_name = param_combo['name']
+            
+            # Get sub-job output directory
+            sub_job_output_dir = self.parameter_matrix.get_sub_job_output_dir(batch_id, param_id)
+            
+            script_content += f"# Launch parameter combination {i+1}/{num_combinations}: {param_name}\n"
+            script_content += f"echo 'Starting parameter combination {param_id}: {param_name}'\n"
+            script_content += f"mkdir -p {sub_job_output_dir}\n"
+            
+            # Create parameter-specific batch list file
+            param_batch_list = os.path.join(sub_job_output_dir, "cif_file_list.txt")
+            script_content += f"cp {batch_list_file} {param_batch_list}\n"
+            
+            # Launch sub-job in background
+            script_content += f"(\n"
+            script_content += f"    export PARAM_ID={param_id}\n"
+            script_content += f"    export PARAM_NAME='{param_name}'\n"
+            
+            # Export parameter values as environment variables
+            parameters = param_combo['parameters']
+            for param_key, param_value in parameters.items():
+                script_content += f"    export PARAM_{param_key.upper()}={param_value}\n"
+            
+            # Generate workflow steps for this parameter combination
+            workflow_steps = self._generate_parameter_workflow_steps(batch_id, param_id, sub_job_output_dir, param_batch_list)
+            
+            # Add workflow steps with proper indentation
+            for line in workflow_steps.split('\n'):
+                if line.strip():
+                    script_content += f"    {line}\n"
+            
+            script_content += f"    echo $? > {os.path.join(sub_job_output_dir, 'exit_status.log')}\n"
+            script_content += f") &\n"
+            script_content += f"SUB_PIDS[{i}]=$!\n"
+            script_content += f"echo 'Parameter combination {param_id} started with PID ${SUB_PIDS[{i}]}'\n\n"
+        
+        # Wait for all sub-jobs to complete
+        script_content += "echo 'Waiting for all parameter combinations to complete...'\n"
+        script_content += "overall_exit_status=0\n\n"
+        
+        script_content += "for i in \"${!SUB_PIDS[@]}\"; do\n"
+        script_content += "    wait ${SUB_PIDS[$i]}\n"
+        script_content += "    sub_exit_status=$?\n"
+        script_content += "    echo \"Parameter combination $i completed with exit status $sub_exit_status\"\n"
+        script_content += "    if [ $sub_exit_status -ne 0 ]; then\n"
+        script_content += "        overall_exit_status=$sub_exit_status\n"
+        script_content += "    fi\n"
+        script_content += "done\n\n"
+        
+        # Write final completion status
+        script_content += f"echo $overall_exit_status > {os.path.join(main_batch_dir, 'exit_status.log')}\n"
+        script_content += "echo 'Parameter matrix job completed at: ' `date`\n"
+        script_content += "exit $overall_exit_status\n"
+        
+        return script_content
+    
+    def _generate_parameter_workflow_steps(self, 
+                                          batch_id: int, 
+                                          param_id: int, 
+                                          output_dir: str, 
+                                          file_list: str) -> str:
+        """
+        Generate workflow steps for a specific parameter combination
+        
+        Args:
+            batch_id: Batch ID
+            param_id: Parameter combination ID
+            output_dir: Output directory for this parameter combination
+            file_list: Path to file containing list of CIF files
+            
+        Returns:
+            Workflow steps as string
+        """
+        steps_content = ""
+        
+        # Check if a workflow is defined in the config
+        workflow = self.config.get('workflow', None)
+        
+        # If no explicit workflow is defined, use the scripts section for sequential processing
+        if not workflow:
+            workflow = []
+            for step_name, script_path in self.scripts.items():
+                if script_path:
+                    workflow.append({
+                        'name': step_name,
+                        'script': script_path,
+                        'output_subdir': step_name,
+                        'required': True
+                    })
+        
+        # Track the previous step's output directory
+        prev_step_output_dir = None
+        
+        # Process each workflow step
+        for i, step in enumerate(workflow):
+            step_name = step.get('name', f'step_{i+1}')
+            script_path = step.get('script', self.scripts.get(step_name, ''))
+            output_subdir = step.get('output_subdir', step_name)
+            required = step.get('required', True)
+            
+            # Skip if no script is defined
+            if not script_path:
+                continue
+            
+            step_output_dir = os.path.join(output_dir, output_subdir)
+            step_input = file_list if prev_step_output_dir is None else prev_step_output_dir
+            
+            # Add step header
+            steps_content += f"echo 'Step {i+1}: {step_name.replace('_', ' ').title()} (Parameter {param_id})'\n"
+            steps_content += f"mkdir -p {step_output_dir}\n"
+            
+            # Check if step completed successfully
+            exit_status_file = os.path.join(step_output_dir, 'exit_status.log')
+            steps_content += f"if [ -f {exit_status_file} ] && [ \"$(cat {exit_status_file})\" = \"0\" ]; then\n"
+            steps_content += f"    echo '✓ Step {step_name} already completed successfully, skipping...'\n"
+            steps_content += f"else\n"
+            steps_content += f"    echo '⚙️ Executing step {step_name}...'\n"
+            
+            # Generate step execution code
+            from .utils import resolve_installed_script_and_type
+            script_file, script_type = resolve_installed_script_and_type(script_path)
+            
+            if script_type == 'bash':
+                steps_content += "    " + self._generate_parameter_bash_step(
+                    script_file=script_file,
+                    step_name=step_name,
+                    batch_id=batch_id,
+                    param_id=param_id,
+                    input_file=step_input,
+                    output_dir=step_output_dir,
+                    step=step,
+                    is_first_step=(prev_step_output_dir is None)
+                ).replace('\n', '\n    ')
+            elif script_type == 'python':
+                steps_content += "    " + self._generate_parameter_python_step(
+                    script_path=script_path,
+                    step_name=step_name,
+                    batch_id=batch_id,
+                    param_id=param_id,
+                    input_file=step_input,
+                    output_dir=step_output_dir,
+                    step=step,
+                    is_first_step=(prev_step_output_dir is None)
+                ).replace('\n', '\n    ')
+            else:
+                raise ValueError(f"Unsupported script type for {script_path}: {script_type}")
+            
+            # Add status check
+            step_var_name = f"{step_name.lower().replace('-', '_')}_status"
+            steps_content += f"    {step_var_name}=$?\n"
+            steps_content += f"    if [ ${step_var_name} -ne 0 ]; then\n"
+            steps_content += f"        echo '❌ {step_name} failed'\n"
+            
+            if required:
+                steps_content += f"        echo '{batch_id}' >> {os.path.join(self.output_path, 'failed_batches.txt')}\n"
+                steps_content += "        exit 1\n"
+            else:
+                steps_content += "        # Continue despite failure in this optional step\n"
+            
+            steps_content += "    fi\n"
+            
+            # Write exit status to file
+            if step_name != 'simulation' and 'mps_run' not in script_path:
+                steps_content += f"    echo $? > {exit_status_file}\n"
+            
+            steps_content += "fi\n"
+            
+            # Update previous step output directory
+            prev_step_output_dir = step_output_dir
+        
+        return steps_content
+    
+    def _generate_parameter_bash_step(self, 
+                                     script_file: str, 
+                                     step_name: str, 
+                                     batch_id: int, 
+                                     param_id: int,
+                                     input_file: str, 
+                                     output_dir: str, 
+                                     step: Dict[str, Any],
+                                     is_first_step: bool = False) -> str:
+        """
+        Generate bash script execution for a parameter-specific step
+        
+        Args:
+            script_file: Path to the script file
+            step_name: Name of the step
+            batch_id: Batch ID
+            param_id: Parameter combination ID
+            input_file: Input file or directory
+            output_dir: Output directory for this step
+            step: Step configuration dictionary
+            is_first_step: Whether this is the first step in the workflow
+            
+        Returns:
+            Bash script content for this step
+        """
+        content = ""
+        
+        # Change to output directory and copy script
+        script_path = script_file
+        script_basename = os.path.basename(script_path)
+        local_script = f"{step_name}_{script_basename}"
+        
+        content += f"cd {output_dir}\n"
+        content += f"cp {script_path} ./{local_script}\n"
+        content += f"chmod +x ./{local_script}\n"
+        
+        # Handle template processing with parameter substitution
+        template_env_var = ""
+        if 'run_file_templates' in self.config and f'{step_name}_input' in self.config['run_file_templates']:
+            template_config = self.config['run_file_templates'][f'{step_name}_input']
+            if isinstance(template_config, dict) and 'file_path' in template_config:
+                template_file_path = template_config['file_path']
+                
+                if template_file_path and os.path.exists(template_file_path):
+                    local_template = f"{step_name}_template_param_{param_id}.input"
+                    content += f"# Copy and modify template with parameter values\n"
+                    content += f"cp {template_file_path} ./{local_template}\n"
+                    
+                    # Get template variables from config
+                    template_vars = {}
+                    if 'variables' in template_config:
+                        for var_key, var_value in template_config['variables'].items():
+                            template_vars[f"SIM_VAR_{var_key.upper()}"] = var_value
+                    
+                    # Convert parameter matrix parameters to SIM_VAR_ environment variables
+                    if self.parameter_matrix.is_enabled():
+                        parameters = self.parameter_matrix.get_parameters_for_combination(param_id)
+                        for param_key, param_value in parameters.items():
+                            # Convert parameter names to SIM_VAR_ format
+                            template_vars[f"SIM_VAR_{param_key.upper()}"] = param_value
+                    
+                    # Apply all template variable substitutions using sed (same as standard script)
+                    for var_name, var_value in template_vars.items():
+                        var_key = var_name.replace('SIM_VAR_', '')
+                        content += f"if grep -q \"^{var_key}\" ./{local_template}; then\n"
+                        content += f"  # Replace existing variable\n"
+                        content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
+                        content += f"else\n"
+                        content += f"  # Add variable if it doesn't exist\n"
+                        content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
+                        content += f"fi\n"
+                    
+                    template_env_var = f"$(pwd)/{local_template}"
+                    content += f"export TEMPLATE_{step_name.upper()}_INPUT=\"{template_env_var}\"\n"
+        
+        # Execute the script
+        content += f"# Execute script with parameter-specific settings\n"
+        if template_env_var:
+            content += f"bash ./{local_script} {batch_id} {input_file} {output_dir} {template_env_var}\n"
+        else:
+            content += f"bash ./{local_script} {batch_id} {input_file} {output_dir}\n"
+        
+        content += f"script_status=$?\n"
+        content += f"if [ $script_status -eq 0 ]; then\n"
+        content += f"    rm -f ./{local_script}\n"
+        content += f"fi\n"
+        content += f"cd -\n"
+        
+        return content
+    
+    def _generate_parameter_python_step(self, 
+                                       script_path: str, 
+                                       step_name: str, 
+                                       batch_id: int, 
+                                       param_id: int,
+                                       input_file: str, 
+                                       output_dir: str, 
+                                       step: Dict[str, Any],
+                                       is_first_step: bool = False) -> str:
+        """
+        Generate python script execution for a parameter-specific step
+        
+        Args:
+            script_path: Path to the script
+            step_name: Name of the step
+            batch_id: Batch ID
+            param_id: Parameter combination ID
+            input_file: Input file or directory
+            output_dir: Output directory for this step
+            step: Step configuration dictionary
+            is_first_step: Whether this is the first step in the workflow
+            
+        Returns:
+            Python script execution content for this step
+        """
+        content = ""
+        
+        # Handle template processing with parameter substitution
+        if 'run_file_templates' in self.config and f'{step_name}_input' in self.config['run_file_templates']:
+            template_config = self.config['run_file_templates'][f'{step_name}_input']
+            if isinstance(template_config, dict) and 'file_path' in template_config:
+                template_file_path = template_config['file_path']
+                
+                if template_file_path and os.path.exists(template_file_path):
+                    local_template = f"{step_name}_template_param_{param_id}.input"
+                    template_full_path = os.path.join(output_dir, local_template)
+                    
+                    content += f"# Create parameter-specific template\n"
+                    content += f"mkdir -p {output_dir}\n"
+                    content += f"cp {template_file_path} {template_full_path}\n"
+                    
+                    # Get template variables from config
+                    template_vars = {}
+                    if 'variables' in template_config:
+                        for var_key, var_value in template_config['variables'].items():
+                            template_vars[f"SIM_VAR_{var_key.upper()}"] = var_value
+                    
+                    # Convert parameter matrix parameters to SIM_VAR_ environment variables
+                    if self.parameter_matrix.is_enabled():
+                        parameters = self.parameter_matrix.get_parameters_for_combination(param_id)
+                        for param_key, param_value in parameters.items():
+                            # Convert parameter names to SIM_VAR_ format
+                            template_vars[f"SIM_VAR_{param_key.upper()}"] = param_value
+                    
+                    # Apply all template variable substitutions using sed (same as bash approach)
+                    for var_name, var_value in template_vars.items():
+                        var_key = var_name.replace('SIM_VAR_', '')
+                        content += f"if grep -q \"^{var_key}\" {template_full_path}; then\n"
+                        content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" {template_full_path}\n"
+                        content += f"else\n"
+                        content += f"  echo \"{var_key} {var_value}\" >> {template_full_path}\n"
+                        content += f"fi\n"
+                    
+                    content += f"export TEMPLATE_{step_name.upper()}_INPUT=\"{template_full_path}\"\n"
+        
+        # Get arguments
+        args = step.get('args', [])
+        if not args:
+            args = [input_file, output_dir]
+            
+            # Add template path if applicable
+            template_key = f"{step_name}_input"
+            if 'run_file_templates' in self.config and template_key in self.config['run_file_templates']:
+                template_env_var = f"$TEMPLATE_{step_name.upper()}_INPUT"
+                args.append(template_env_var)
+        
+        # Add parameter ID as additional argument
+        args_str = ' '.join([str(arg) for arg in [batch_id, param_id] + args])
+        
+        # Generate command based on script path format
+        if '/' in script_path or script_path.endswith('.py'):
+            content += f"python {script_path} {args_str}\n"
+        else:
+            content += f"python -m {script_path} {args_str}\n"
+        
+        return content
         
         # Write script to file
         with open(script_path, 'w') as f:

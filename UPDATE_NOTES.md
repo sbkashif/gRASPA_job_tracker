@@ -1,5 +1,89 @@
 # gRASPA Job Tracker - Update Notes
 
+## July 17, 2025: Parameter Matrix Support for Multi-Dimensional Parameter Sweeps
+
+### New Features: Parameter Matrix System
+
+- **Parameter Matrix Configuration**: Added comprehensive support for multi-dimensional parameter sweeps through the new `parameter_matrix` configuration section
+  - Define parameter ranges for temperature, pressure, mole fractions, and any custom parameters
+  - Support for "all combinations" mode generating full factorial designs (e.g., 3×3×3×3 = 81 combinations)
+  - Future support planned for custom parameter combinations
+
+- **Individual Job Submission Architecture**: 
+  - Each parameter combination now gets its own dedicated SLURM job for optimal resource utilization
+  - Eliminates the previous multi-node job submission approach that was problematic for SLURM schedulers
+  - Each job handles a single parameter combination for a single CIF file, providing maximum parallelization
+
+- **Flexible Parameter Tracking System**:
+  - Dynamic CSV tracking with `param_combination_id` column for easy identification
+  - Consistent parameter naming convention: `T298_P100000_CO20.15_N20.85`
+  - Batch-specific combination IDs: `B{batch_id}_{param_combination}`
+  - Flexible column structure that adapts to different parameter sets
+
+- **Enhanced Directory Structure**:
+  - Parameter-specific output directories: `results/B1_T298_P100000_CO20.15_N20.85/`
+  - Individual job scripts per parameter combination: `job_scripts/job_batch_1_param_0.sh`
+  - Separate log files for each parameter job: `job_logs/batch_1_param_0_%j.out`
+
+### Technical Implementation
+
+- **Parameter Matrix Module**: New `parameter_matrix.py` module handles:
+  - Parameter combination generation using `itertools.product`
+  - Consistent parameter naming with intelligent abbreviations
+  - Sub-job output directory management
+  - Parameter-specific template file generation
+
+- **Job Scheduler Enhancements**:
+  - Updated `job_scheduler.py` to handle parameter matrix job creation
+  - Individual job script generation for each parameter combination
+  - Template substitution with parameter-specific values
+  - Environment variable exports for all parameter values
+
+- **Job Tracker Updates**:
+  - Modified `job_tracker.py` to support parameter combination tracking
+  - Updated status tracking methods to use `param_combination_id`
+  - Enhanced job submission loop for parameter matrix jobs
+  - Improved error handling for parameter-specific failures
+
+### Configuration Example
+
+```yaml
+parameter_matrix:
+  parameters:
+    temperature: [298, 313, 333]  # K
+    pressure: [100000, 200000, 500000]  # Pa
+    co2_molfraction: [0.15, 0.25, 0.35]  # CO2 mole fraction
+    n2_molfraction: [0.85, 0.75, 0.65]   # N2 mole fraction
+  
+  combinations: 'all'  # Creates 3×3×3×3 = 81 parameter combinations per batch
+```
+
+### Usage Examples
+
+Run parameter matrix simulation:
+```bash
+gRASPA_job_tracker --config config-parameter-matrix.yaml
+```
+
+Test parameter matrix with dry run:
+```bash
+gRASPA_job_tracker --config config-parameter-matrix.yaml --dry-run
+```
+
+### Benefits
+
+1. **Scalability**: Handles thousands of parameter combinations efficiently (24 batches × 81 combinations = 1,944 jobs)
+2. **Resource Optimization**: Each job uses exactly the resources needed for one parameter combination
+3. **Fault Tolerance**: Individual parameter combination failures don't affect other combinations
+4. **Flexibility**: Easy to add new parameters or modify parameter ranges
+5. **Tracking**: Comprehensive tracking of individual parameter combination progress
+
+### Compatibility
+
+- Fully backward compatible with existing single-parameter job configurations
+- Existing batch processing workflows continue to work unchanged
+- Parameter matrix is an optional feature that can be enabled/disabled per configuration
+
 ## April 2, 2025: Comprehensive Testing Framework for Simulation Results
 
 ### Added Testing Framework

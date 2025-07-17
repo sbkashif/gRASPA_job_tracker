@@ -2,59 +2,103 @@
 
 A Python package for generating large datasets of results from gRASPA simulations. This package is designed to facilitate the automated submission and tracking of multiple gRASPA jobs, and designing customized workflows from preprocessing to simulation to analysis.
 
+## 🚀 NEW RELEASE: Parameter Matrix Support (July 2025)
+
+### Multi-Dimensional Parameter Sweeps
+The latest release introduces comprehensive **parameter matrix support** for conducting multi-dimensional parameter sweeps. This powerful feature allows you to:
+
+- **Define parameter ranges** for temperature, pressure, mole fractions, and any custom parameters
+- **Generate full factorial designs** automatically (e.g., 3×3×3×3 = 81 parameter combinations)
+- **Submit individual SLURM jobs** for each parameter combination for optimal resource utilization
+- **Track progress** of thousands of parameter combinations with enhanced monitoring
+
+### Key Benefits
+- 🔧 **Flexible Configuration**: Easy YAML-based parameter definition
+- ⚡ **Optimal Parallelization**: Each parameter combination runs as its own job
+- 📊 **Comprehensive Tracking**: Individual progress monitoring for each parameter combination
+- 🎯 **Fault Tolerance**: Parameter combination failures don't affect other combinations
+- 📈 **Scalable**: Handles thousands of jobs efficiently (tested with 1,944 jobs)
+- 📂 **Organized Results**: Results stored in parameter-specific directories for easy analysis
+
+### Quick Start Example
+```yaml
+parameter_matrix:
+  parameters:
+    temperature: [298, 313, 333]
+    pressure: [100000, 200000, 500000]
+    co2_molfraction: [0.15, 0.25, 0.35]
+    n2_molfraction: [0.85, 0.75, 0.65]
+  combinations: 'all'  # Creates 81 parameter combinations per batch
+```
+
+```bash
+gRASPA_job_tracker --config config-parameter-matrix.yaml
+```
+
+---
+
 ## Features
 
+- **Parameter Matrix Support**: Conduct multi-dimensional parameter sweeps with automated job generation for each parameter combination
 - Configurable runs via a YAML configuration file
 - Divide the database into batches for parallel processing using various strategies
-- Customaziable workflow by specifying paths to scripts. The workflow has been tested on a three-step sequential process: generate partial charges, run gRASPA simulations, and obtain adsorbate loadings.
+- Customizable workflow by specifying paths to scripts. The workflow has been tested on a three-step sequential process: generate partial charges, run gRASPA simulations, and obtain adsorbate loadings.
 - Automated job submission to SLURM, tracking job status, and, optionally, resubmission of failed jobs.
+- Individual job allocation per parameter combination for optimal resource utilization
 
 ## Directory Structure
 
+The package uses a structured directory layout to organize scripts, results, and logs. The main directories are:
+
+
 ```
-gRASPA_job_tracker/
-├── gRaspa_job_tracker/     # Python package
-|   ├── batch_manager.py
-|   ├── cli.py
-|   ├── config_parser.py
-|   ├── job_scheduler.py
-|   ├── job_tracker.py
-|   ├── scripts
-|   │   ├── all step-specific main and supporting scripts 
-|   │   └── ...
-|   └── utils.py
-├── examples/               # Example files
-│   ├── config.yaml         # Example configuration
-│   ├── {PROJECT_NAME}/     # Example data
-│       ├── data/           # Original database files
-│           ├── raw/        # Original database files
-│           ├── batches/    # Processed results -- List of CIF files in individual batches
-│           │   ├── batch_1.csv
-│           │   ├── batch_2.csv
-│           │   └── ...
-│           ├── job_logs/ #SLURM output files of each batch
-│           ├── job_status.csv #Job tracking
-│           ├── job_scripts/ #SLURM scripts for each batch
-│           └── results/
-│               ├── batch_1/
-│               │   ├── partial_charges/ #CIF files with partial charges calculated from PACMOF2
-│               │   ├── simulations/ #gRASPA output files
-│               │   └── analysis/ # CSV file with adsorbate loadings parsed from gRASPA output
-│               ├── batch_2/
-│               ├── batch_3/
-│               └── ...
-├── forcefields/            # forcefield files
-│   └── forcefiled_1_dir/
-│   ├── forcefiled_2_dir/
-├── templates/              # templates for the job submission
-│   ├── simulation.input    # grapsa simulation input file
-│   └── slurm_template.sh   # slurm job submission template
-├── .gitignore
-├── LICENSE
-├── README.md
-├── environment.yml
-└── setup.py
+{PROJECT_NAME}/
+├── data/
+│   ├── raw/                # Original database files
+│   ├── batches/            # Batch CSV files (same as standard)
+│   │   ├── batch_1.csv     # Contains single CIF file per batch
+│   │   ├── batch_2.csv
+│   │   └── ...
+│   ├── job_logs/           # Individual parameter combination logs
+│   │   ├── batch_1_param_0_%j.out
+│   │   ├── batch_1_param_1_%j.out
+│   │   ├── batch_1_param_2_%j.out
+│   │   └── ...
+│   ├── job_status.csv      # Enhanced tracking with param_combination_id
+│   ├── job_scripts/        # Individual job scripts per parameter combination
+│   │   ├── job_batch_1_param_0.sh
+│   │   ├── job_batch_1_param_1.sh
+│   │   ├── job_batch_1_param_2.sh
+│   │   └── ...
+│   ├── parameter_matrix.json # Generated parameter combinations
+│   └── results/            # Parameter-specific result directories
+│       ├── B1_T298_P100000_CO20.15_N20.85/    # Batch 1, Parameter combination 0
+│       │   ├── cif_file_list.txt
+│       │   ├── simulation/
+│       │   │   ├── exit_status.log
+│       │   │   └── [simulation results]
+│       │   ├── analysis/
+│       │   │   ├── exit_status.log
+│       │   │   └── [analysis results]
+│       │   └── exit_status.log
+│       ├── B1_T298_P100000_CO20.15_N20.75/    # Batch 1, Parameter combination 1
+│       │   ├── cif_file_list.txt
+│       │   ├── simulation/
+│       │   └── analysis/
+│       ├── B1_T298_P100000_CO20.15_N20.65/    # Batch 1, Parameter combination 2
+│       │   └── ...
+│       ├── B2_T298_P100000_CO20.15_N20.85/    # Batch 2, Parameter combination 0
+│       │   └── ...
+│       └── ...                                # Up to thousands of parameter combinations
 ```
+
+### Key Differences in Parameter Matrix Structure:
+
+1. **Individual Job Scripts**: Each parameter combination gets its own job script
+2. **Parameter-Specific Directories**: Results are organized by `B{batch_id}_{parameter_combination_name}/`
+3. **Enhanced Job Tracking**: `job_status.csv` includes `param_combination_id` column
+4. **Scalable Structure**: Supports thousands of parameter combinations efficiently
+5. **Isolated Results**: Each parameter combination has completely separate output directories
 
 ## Installation
 
@@ -108,6 +152,20 @@ graspa_job_tracker --config my_config.yaml --prepare-only
 graspa_job_tracker --config my_config.yaml
 ```
 
+### Parameter Matrix Usage
+
+For parameter matrix runs, the workflow is the same but each batch will generate multiple jobs:
+
+```bash
+# Test parameter matrix configuration with dry run
+graspa_job_tracker --config config-parameter-matrix.yaml --dry-run
+
+# Run parameter matrix simulation
+graspa_job_tracker --config config-parameter-matrix.yaml
+```
+
+### Advanced Usage Options
+
 There are many different ways in which Step 2 can be run. You can also constrain the batches to be considered for submission:
 
 ```bash
@@ -126,6 +184,63 @@ graspa_job_tracker --config my_config.yaml --run-single-cif <PATH_TO_CIF_FILE>
 #This functionality is not yet tested
 ```   
 
+## Parameter Matrix Configuration
+
+The parameter matrix feature allows you to conduct comprehensive parameter sweeps by defining ranges for multiple parameters. Each combination of parameters will be run as a separate SLURM job, providing optimal parallelization and resource utilization.
+
+### Basic Configuration
+
+Add a `parameter_matrix` section to your configuration file:
+
+```yaml
+parameter_matrix:
+  # Define parameter ranges
+  parameters:
+    temperature: [298, 313, 333]  # K
+    pressure: [100000, 200000, 500000]  # Pa
+    co2_molfraction: [0.15, 0.25, 0.35]  # CO2 mole fraction
+    n2_molfraction: [0.85, 0.75, 0.65]   # N2 mole fraction
+  
+  # How to combine parameters
+  combinations: 'all'  # Creates 3×3×3×3 = 81 parameter combinations per batch
+```
+
+### Parameter Naming Convention
+
+The system uses a consistent naming convention for parameter combinations:
+- `T298_P100000_CO20.15_N20.85` for temperature=298K, pressure=100000Pa, CO2=0.15, N2=0.85
+- Parameters are automatically abbreviated: `T` (temperature), `P` (pressure), `CO2` (CO2 mole fraction), `N2` (N2 mole fraction)
+
+### Directory Structure
+
+Each parameter combination gets its own directory structure:
+```
+results/
+├── B1_T298_P100000_CO20.15_N20.85/
+│   ├── simulation/
+│   └── analysis/
+├── B1_T298_P100000_CO20.15_N20.75/
+│   ├── simulation/
+│   └── analysis/
+└── ...
+```
+
+### Job Script Generation
+
+- Individual SLURM job scripts are generated for each parameter combination
+- Each job script includes parameter-specific environment variables
+- Template files are automatically updated with parameter values
+- Job scripts are named: `job_batch_{batch_id}_param_{param_id}.sh`
+
+### Scaling Example
+
+For a configuration with:
+- 24 batches (MOF structures)
+- 81 parameter combinations (3×3×3×3)
+- Total jobs: 24 × 81 = **1,944 individual SLURM jobs**
+
+Each job processes one MOF structure with one parameter combination, providing maximum parallelization.
+
 ## Batch Splitting Strategies
 
 The package supports multiple strategies for splitting your database into batches:
@@ -137,12 +252,13 @@ The package supports multiple strategies for splitting your database into batche
 
 ## Configuration Options
 
-See the example configuration file in `examples/config-coremof-clean.yaml` for a reference. The configuration file allows you to specify:
+See the example configuration file in `examples/config-coremof-clean.yaml` for a standard reference, or `examples/config-parameter-matrix.yaml` for parameter matrix configuration. The configuration file allows you to specify:
 - **Database Source**: Local path or URL to download the database
-- **Batch Splitting Strategy**: custom\_alphabetical
+- **Batch Splitting Strategy**: custom\_alphabetical, alphabetical, size-based, or random
+- **Parameter Matrix**: Multi-dimensional parameter sweep configuration (optional)
 - **SLURM Settings**: Account, partition, time limits, and other SLURM parameters as per NCSA cluster
 - **Load Dependencies**: Paths to required software dependencies like gRASPA and PACMOF2
-- **Script Paths**: Paths to your custom scripts: partial charge calculation, gRASPA simulaiton, analysis to parse adsorbate loadings
+- **Script Paths**: Paths to your custom scripts: partial charge calculation, gRASPA simulation, analysis to parse adsorbate loadings
 - **Force field and simulation parameters**: Paths to forcefield files and template `simulation.input` file for gRASPA simulations, alongside modifications made to simulation parameters in the current run.
 
 ## Force field and simulation paramters
@@ -175,7 +291,20 @@ All files will be prefixed with `FF_` in the environment variables during proces
 
 The status on jobs running for individual batches can be tracked in `jobs_status.csv` file which is generated in the ${PROJECT\_ROOT} directory defined in the config file.
 
-### Tracker file
+### Parameter Matrix Job Tracking
+
+For parameter matrix runs, each parameter combination is tracked individually with a unique `param_combination_id`:
+
+```csv
+batch_id,job_id,param_combination_id,status,submission_time,completion_time,workflow_stage
+1,12345,B1_T298_P100000_CO20.15_N20.85,RUNNING,2025-07-17 10:00:00,,simulation
+1,12346,B1_T298_P100000_CO20.15_N20.75,COMPLETED,2025-07-17 10:00:00,2025-07-17 12:00:00,completed
+1,12347,B1_T298_P100000_CO20.15_N20.65,PENDING,2025-07-17 10:00:00,,pending
+```
+
+### Standard Job Tracking
+
+For standard (non-parameter matrix) runs, the tracking format remains the same:
 
 ```csv
 batch_id,job_id,status,submission_time,completion_time,workflow_stage

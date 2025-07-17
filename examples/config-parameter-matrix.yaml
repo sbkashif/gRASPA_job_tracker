@@ -1,0 +1,91 @@
+# Project configuration
+project:
+  name: "coremof_parameter_matrix"  # Project name used for organizing data directories
+
+# Output directory structure
+output:
+  base_dir: ${PROJECT_ROOT}/examples/data/${project.name}/  # Base directory for output
+
+# Database configuration
+database:
+  path: ${PROJECT_ROOT}/examples/data/${project.name}/raw
+  remote_url: None
+  extract: true
+
+# Batch settings
+batch:
+  size: 1  # Number of structures per batch
+  max_concurrent_jobs: 50  # Maximum number of concurrent jobs
+  strategy: custom_alphabetical  # Options: alphabetical, custom_alphabetical, size_based, random
+  copy_files: false
+
+# Parameter Matrix Configuration - NEW FEATURE
+parameter_matrix:
+  # Define parameter ranges
+  parameters:
+    temperature: [298, 313, 333]  # K
+    pressure: [100000, 200000, 500000]  # Pa
+    co2_molfraction: [0.15, 0.25, 0.35]  # CO2 mole fraction
+    n2_molfraction: [0.85, 0.75, 0.65]   # N2 mole fraction (should sum to 1.0 with CO2)
+  
+  # How to combine parameters: 'all' for all combinations, 'custom' for specific combinations
+  combinations: 'all'  # This will create 3x3x3x3 = 81 parameter combinations per batch
+  
+  # Alternative: use custom combinations
+  # combinations: 'custom'
+  # custom_combinations:
+  #   - name: "low_temp_low_pressure"
+  #     parameters:
+  #       temperature: 298
+  #       pressure: 100000
+  #       co2_molfraction: 0.15
+  #       n2_molfraction: 0.85
+  #   - name: "high_temp_high_pressure"
+  #     parameters:
+  #       temperature: 333
+  #       pressure: 500000
+  #       co2_molfraction: 0.35
+  #       n2_molfraction: 0.65
+
+# Script paths
+scripts:
+  simulation: gRASPA_job_tracker.scripts.raspa_simulation
+  analysis: gRASPA_job_tracker.scripts.raspa_analysis
+
+# File templates with parameter substitution support
+run_file_templates:
+  simulation_input:
+    file_path: ${PROJECT_ROOT}/templates/simulation.input
+    variables:
+      NumberOfInitializationCycles: 2000000
+      NumberOfProductionCycles: 2000000
+      MoviesEvery: 3000000
+      # Parameter matrix values will be automatically substituted in simulation.input
+      # The system will find lines that start with parameter names and replace their values
+      # For example: "Temperature 298" will become "Temperature 313" for parameter combinations
+      # CO2 and N2 mole fractions will be updated in their respective component sections
+
+# Forcefield files
+forcefield_files:
+  force_field_mixing_rules: ${PROJECT_ROOT}/forcefields/N2-Forcefield/force_field_mixing_rules.def
+  force_field: ${PROJECT_ROOT}/forcefields/N2-Forcefield/force_field.def
+  pseudo_atoms: ${PROJECT_ROOT}/forcefields/N2-Forcefield/pseudo_atoms.def
+  CO2: ${PROJECT_ROOT}/forcefields/N2-Forcefield/CO2.def
+  N2: ${PROJECT_ROOT}/forcefields/N2-Forcefield/N2.def
+
+# SLURM configuration - will be scaled for parameter matrix
+slurm_config:
+  account: bcvz-delta-gpu
+  partition: gpuA100x4
+  time: 8:00:00  # Increased time for parameter matrix jobs
+  nodes: 1  # Will be automatically set to number of parameter combinations
+  mem: 50GB
+
+# Environment setup
+environment_setup: |
+  cd $SLURM_SUBMIT_DIR
+  module load anaconda3_gpu
+  source deactivate graspa
+  export LD_LIBRARY_PATH=$HOME/software/gcc-13.3.0/lib64:$LD_LIBRARY_PATH
+  export gRASPA_executable=$HOME/software/gRASPA/patch_Allegro/nvc_main.x
+  source activate graspa
