@@ -227,7 +227,6 @@ class JobScheduler:
             batch_id: ID of the batch
             batch_files: List of CIF file paths in the batch
             param_combo: Parameter combination dictionary
-            
         Returns:
             Path to the created job script
         """
@@ -283,20 +282,15 @@ class JobScheduler:
                         for var_key, var_value in template_config['variables'].items():
                             script_content += f"export SIM_VAR_{var_key.upper()}=\"{var_value}\"\n"
         
-        # Export parameter-specific environment variables
+        # Export parameter-specific environment variables (only SIM_VAR_...)
         script_content += f"\n# Parameter combination {param_id}: {param_name}\n"
         script_content += f"export PARAM_ID={param_id}\n"
         script_content += f"export PARAM_NAME='{param_name}'\n"
-        
-        # Export parameter values as SIM_VAR_ environment variables (same format as template variables)
+        # Export parameter values as SIM_VAR_ environment variables (for template processing)
         parameters = param_combo['parameters']
         for param_key, param_value in parameters.items():
-            # Export as both PARAM_ (for backward compatibility) and SIM_VAR_ (for template processing)
-            script_content += f"export PARAM_{param_key.upper()}={param_value}\n"
             script_content += f"export SIM_VAR_{param_key.upper()}=\"{param_value}\"\n"
-        
-        script_content += "\n"
-        
+        script_content += "\n"  
         # Get sub-job output directory
         sub_job_output_dir = self.parameter_matrix.get_sub_job_output_dir(batch_id, param_id)
         
@@ -1364,7 +1358,7 @@ class JobScheduler:
             
         if dry_run:
             print(f"[DRY RUN] Job script generated at: {script_path}")
-            self.print_job_script(script_path)
+            #self.print_job_script(script_path)
             print(f"[DRY RUN] To submit manually: sbatch {script_path}")
             return "dry-run"
         
