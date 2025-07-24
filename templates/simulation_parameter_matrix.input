@@ -1,9 +1,9 @@
 UseGPUReduction no
 Useflag yes
 
-NumberOfInitializationCycles XX
+NumberOfInitializationCycles ${param.number_of_initialization_cycles}
 NumberOfEquilibrationCycles  0
-NumberOfProductionCycles     XX
+NumberOfProductionCycles     ${param.number_of_production_cycles}
 
 UseChargesFromCIFFile yes
 
@@ -25,8 +25,8 @@ NumberOfSimulations 1
 SingleSimulation yes
 
 InputFileType cif
-FrameworkName XX
-UnitCells 0 X X X
+FrameworkName ${param.framework_name}
+UnitCells ${param.unit_cells}
 
 ChargeMethod Ewald
 Temperature  ${param.temperature}
