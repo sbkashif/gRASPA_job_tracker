@@ -2,10 +2,12 @@
 Parameter Matrix Manager for multi-layered job allocation
 """
 
+
 import os
 import itertools
 from typing import Dict, List, Any, Optional, Tuple
 import json
+import numpy as np
 
 class ParameterMatrix:
     """
@@ -22,22 +24,40 @@ class ParameterMatrix:
         """
         self.config = config
         self.parameter_matrix = config.get('parameter_matrix', {})
-        
-        # Extract parameter definitions
-        self.parameters = self.parameter_matrix.get('parameters', {})
+
+        # Securely evaluate parameter expressions if needed
+        def _evaluate_param_value(val):
+            if isinstance(val, str) and val.strip().startswith('!eval '):
+                expr = val.strip()[6:]
+                # Only allow numpy and builtins needed for lists
+                allowed_names = {'np': np, 'numpy': np, 'list': list, 'float': float, 'int': int}
+                try:
+                    # Compile and evaluate the expression safely
+                    code = compile(expr, '<string>', 'eval')
+                    for name in code.co_names:
+                        if name not in allowed_names:
+                            raise ValueError(f"Use of '{name}' is not allowed in parameter expressions.")
+                    return eval(code, {"__builtins__": {}}, allowed_names)
+                except Exception as e:
+                    raise ValueError(f"Failed to evaluate parameter expression '{val}': {e}")
+            return val
+
+        # Extract and process parameter definitions
+        raw_params = self.parameter_matrix.get('parameters', {})
+        self.parameters = {k: _evaluate_param_value(v) for k, v in raw_params.items()}
         self.combinations = self.parameter_matrix.get('combinations', 'all')  # 'all' or 'custom'
         self.custom_combinations = self.parameter_matrix.get('custom_combinations', [])
-        
+
         # Generate parameter combinations
         self.param_combinations = self._generate_combinations()
-        
+
         # Output structure
         self.output_path = config['output']['output_dir']
         self.param_matrix_file = os.path.join(self.output_path, 'parameter_matrix.json')
-        
+
         # Create output directory
         os.makedirs(self.output_path, exist_ok=True)
-        
+
         # Save parameter matrix for reference
         self._save_parameter_matrix()
     
@@ -58,14 +78,22 @@ class ParameterMatrix:
             # Generate all possible combinations
             param_keys = list(self.parameters.keys())
             param_values = [self.parameters[key] for key in param_keys]
-            
-            for i, combo in enumerate(itertools.product(*param_values)):
+
+            molfraction_keys = [k for k in param_keys if k.lower().endswith('_molfraction')]
+            tol = 1e-6
+            idx = 0
+            for combo in itertools.product(*param_values):
                 param_dict = dict(zip(param_keys, combo))
+                if molfraction_keys:
+                    mf_sum = sum(float(param_dict[k]) for k in molfraction_keys)
+                    if abs(mf_sum - 1.0) > tol:
+                        continue  # skip unphysical combination
                 combinations.append({
-                    'param_id': i,
+                    'param_id': idx,
                     'name': self._generate_param_name(param_dict),
                     'parameters': param_dict
                 })
+                idx += 1
         
         elif self.combinations == 'custom':
             # Use custom combinations
