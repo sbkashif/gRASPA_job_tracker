@@ -10,6 +10,24 @@ from urllib.parse import urlparse
 from tqdm import tqdm
 
 class ConfigParser:
+    def _evaluate_parameter_matrix(self):
+        """Evaluate '!eval ...' expressions in parameter_matrix.parameters, allowing numpy functions."""
+        import numpy as np
+        param_matrix = self.config.get('parameter_matrix', {})
+        if not param_matrix or 'parameters' not in param_matrix:
+            return
+        params = param_matrix['parameters']
+        for key, value in params.items():
+            if isinstance(value, str) and value.strip().startswith('!eval '):
+                expr = value.strip()[6:].strip()
+                # Only allow np.<func> and numpy.<func>
+                allowed_names = {'np': np, 'numpy': np}
+                try:
+                    result = eval(expr, {"__builtins__": {}}, allowed_names)
+                except Exception as e:
+                    raise ValueError(f"Failed to evaluate parameter expression '{value}': {e}")
+                params[key] = result
+        self.config['parameter_matrix']['parameters'] = params
     """Parse and validate configuration files for GRASPA job tracking"""
     
     def __init__(self, config_path: str):
@@ -23,6 +41,7 @@ class ConfigParser:
         self.config = self._load_config()
         self._process_variables()
         self._set_default_paths()  # Set default paths BEFORE validation
+        self._evaluate_parameter_matrix()  # Evaluate parameter matrix expressions
         self._validate_config()
     
     def _load_config(self) -> Dict[str, Any]:
