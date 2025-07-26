@@ -8,19 +8,10 @@ A Python package for generating large datasets of results from gRASPA simulation
 The latest release introduces comprehensive **parameter matrix support** for conducting multi-dimensional parameter sweeps. This powerful feature allows you to:
 
 - **Define parameter ranges** for temperature, pressure, mole fractions, and any custom parameters
-- **Generate full factorial designs** automatically (e.g., 3×3×3×3 = 81 parameter combinations)
-- **Submit individual SLURM jobs** for each parameter combination for optimal resource utilization
-- **Track progress** of thousands of parameter combinations with enhanced monitoring
+- **Generate full factorial designs** automatically (e.g., 3×3×3×3 = 81 parameter combinations) or any custom combination
+- **Track progress** of thousands of parameter combinations with [enhanced monitoring](#parameter-matrix-job-tracking)
 
-### Key Benefits
-- 🔧 **Flexible Configuration**: Easy YAML-based parameter definition
-- ⚡ **Optimal Parallelization**: Each parameter combination runs as its own job
-- 📊 **Comprehensive Tracking**: Individual progress monitoring for each parameter combination
-- 🎯 **Fault Tolerance**: Parameter combination failures don't affect other combinations
-- 📈 **Scalable**: Handles thousands of jobs efficiently (tested with 1,944 jobs)
-- 📂 **Organized Results**: Results stored in parameter-specific directories for easy analysis
-
-### Quick Start Example
+### Parameter matrix definition in config file
 ```yaml
 parameter_matrix:
   parameters:
@@ -29,10 +20,6 @@ parameter_matrix:
     co2_molfraction: [0.15, 0.25, 0.35]
     n2_molfraction: [0.85, 0.75, 0.65]
   combinations: 'all'  # Creates 81 parameter combinations per batch
-```
-
-```bash
-gRASPA_job_tracker --config config-parameter-matrix.yaml
 ```
 
 ---
@@ -44,7 +31,7 @@ gRASPA_job_tracker --config config-parameter-matrix.yaml
 - Divide the database into batches for parallel processing using various strategies
 - Customizable workflow by specifying paths to scripts. The workflow has been tested on a three-step sequential process: generate partial charges, run gRASPA simulations, and obtain adsorbate loadings.
 - Automated job submission to SLURM, tracking job status, and, optionally, resubmission of failed jobs.
-- Individual job allocation per parameter combination for optimal resource utilization
+
 
 ## Directory Structure
 
@@ -92,13 +79,7 @@ The package uses a structured directory layout to organize scripts, results, and
 │       └── ...                                # Up to thousands of parameter combinations
 ```
 
-### Key Differences in Parameter Matrix Structure:
 
-1. **Individual Job Scripts**: Each parameter combination gets its own job script
-2. **Parameter-Specific Directories**: Results are organized by `B{batch_id}_{parameter_combination_name}/`
-3. **Enhanced Job Tracking**: `job_status.csv` includes `param_combination_id` column
-4. **Scalable Structure**: Supports thousands of parameter combinations efficiently
-5. **Isolated Results**: Each parameter combination has completely separate output directories
 
 ## Installation
 
@@ -150,18 +131,6 @@ The recommended way to run the job tracker is in two steps. The first step is a 
 graspa_job_tracker --config my_config.yaml --prepare-only
 #Step 2
 graspa_job_tracker --config my_config.yaml
-```
-
-### Parameter Matrix Usage
-
-For parameter matrix runs, the workflow is the same but each batch will generate multiple jobs:
-
-```bash
-# Test parameter matrix configuration with dry run
-graspa_job_tracker --config config-parameter-matrix.yaml --dry-run
-
-# Run parameter matrix simulation
-graspa_job_tracker --config config-parameter-matrix.yaml
 ```
 
 ### Advanced Usage Options
