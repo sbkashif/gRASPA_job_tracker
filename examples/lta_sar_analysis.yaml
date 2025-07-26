@@ -1,0 +1,87 @@
+
+# Project configuration
+project:
+  name: "lta_sar_analysis"  # Project name used for organizing data directories
+
+# Output directory structure
+output:
+  base_dir: ${PWD}/data/${project.name}  # Base directory for output
+
+# Database configuration
+database:
+  # Provide one of the following (optional):
+  source: ${PWD}/database
+  # remote_url: https://example.com/database.zip
+  # If neither is provided, the code will error if raw dir is missing.
+
+# Batch settings
+batch:
+  size: 1  # Number of structures per batch
+  max_concurrent_jobs: 50  # Maximum number of concurrent jobs
+  strategy: custom_alphabetical  # Options: alphabetical, custom_alphabetical, size_based, random
+  copy_files: false
+
+# Parameter Matrix Configuration - NEW FEATURE
+parameter_matrix:
+  # Define parameter ranges
+  parameters:
+    temperature: [373]  # K
+    pressure: "!eval np.logspace(-6,7,34).tolist()"  # Pa
+    n2_molfraction: [0.0, 0.5, 0.33, 1.0]  # N2 mole fraction
+    h2_molfraction: [0.0, 0.5, 0.33, 1.0]  # H2 mole fraction
+    nh3_molfraction: [0.0, 0.5, 0.33, 1.0]  # NH3 mole fraction
+  # How to combine parameters: 'all' for all combinations, 'custom' for specific combinations
+  combinations: 'all'  # This will create 3x3x3x3 = 81 parameter combinations per batch. However, combination will be skipped if molfraction doesn't add up to 1.
+  
+
+# Script paths
+scripts:
+  simulation: gRASPA_job_tracker.scripts.raspa2_run
+  analysis: gRASPA_job_tracker.scripts.raspa_analysis
+
+# File templates with parameter substitution support
+run_file_templates:
+  simulation_input:
+    file_path: ${PACKAGE_PATH}/templates/simulation_lta_sar_analysis.input
+    variables:
+      NumberOfCycles: 2000000
+      NumberOfProductionCycles: 2000000
+      WriteMoviesEvery: 1000
+      # Parameter matrix values will be automatically substituted in simulation.input
+      # The system will find lines that start with parameter names and replace their values
+      # For example: "Temperature 298" will become "Temperature 313" for parameter combinations
+      # CO2 and N2 mole fractions will be updated in their respective component sections
+
+# Forcefield files
+forcefield_files:
+  force_field_mixing_rules: ${PACKAGE_PATH}/forcefields/calero/force_field_mixing_rules.def
+  force_field: ${PACKAGE_PATH}/forcefields/calero/force_field.def
+  pseudo_atoms: ${PACKAGE_PATH}/forcefields/calero/pseudo_atoms.def
+  NH3: ${PACKAGE_PATH}/forcefields/calero/NH3_TraPPE.def
+  H2: ${PACKAGE_PATH}/forcefields/calero/H2_TraPPE.def
+  N2: ${PACKAGE_PATH}/forcefields/calero/N2_TraPPE.def
+
+# SLURM configuration - will be scaled for parameter matrix
+slurm_config:
+  account: bcvz-delta-gpu
+  partition: gpuA100x4
+  time: 8:00:00  # Increased time for parameter matrix jobs
+  nodes: 1  # Will be automatically set to number of parameter combinations
+  mem: 50GB
+
+# Environment setup
+environment_setup: |
+  cd $SLURM_SUBMIT_DIR
+  # print the resource information
+  echo "Running on host: $(hostname)"
+  echo "Job ID: $SLURM_JOB_ID"
+
+  
+  # load necessary modules
+  module load ccrsoft/2023.01
+  module load gcc/11.3.0
+  module load openmpi/4.1.4
+
+  # specify location of raspa installation
+  export RASPA_DIR=/projects/academic/kaihangs/salmanbi/software/RASPA2-2.0.35_changed_sysctl.h/bin
+
