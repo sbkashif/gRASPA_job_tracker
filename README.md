@@ -151,62 +151,6 @@ graspa_job_tracker --config my_config.yaml --run-single-cif <PATH_TO_CIF_FILE>
 #This functionality is not yet tested
 ```   
 
-## Parameter Matrix Configuration
-
-The parameter matrix feature allows you to conduct comprehensive parameter sweeps by defining ranges for multiple parameters. Each combination of parameters will be run as a separate SLURM job, providing optimal parallelization and resource utilization.
-
-### Basic Configuration
-
-Add a `parameter_matrix` section to your configuration file:
-
-```yaml
-parameter_matrix:
-  # Define parameter ranges
-  parameters:
-    temperature: [298, 313, 333]  # K
-    pressure: [100000, 200000, 500000]  # Pa
-    co2_molfraction: [0.15, 0.25, 0.35]  # CO2 mole fraction
-    n2_molfraction: [0.85, 0.75, 0.65]   # N2 mole fraction
-  
-  # How to combine parameters
-  combinations: 'all'  # Creates 3×3×3×3 = 81 parameter combinations per batch
-```
-
-### Parameter Naming Convention
-
-The system uses a consistent naming convention for parameter combinations:
-- `T298_P100000_CO20.15_N20.85` for temperature=298K, pressure=100000Pa, CO2=0.15, N2=0.85
-- Parameters are automatically abbreviated: `T` (temperature), `P` (pressure), `CO2` (CO2 mole fraction), `N2` (N2 mole fraction)
-
-### Directory Structure
-
-Each parameter combination gets its own directory structure:
-```
-results/
-├── B1_T298_P100000_CO20.15_N20.85/
-│   ├── simulation/
-│   └── analysis/
-├── B1_T298_P100000_CO20.15_N20.75/
-│   ├── simulation/
-│   └── analysis/
-└── ...
-```
-
-### Job Script Generation
-
-- Individual SLURM job scripts are generated for each parameter combination
-- Each job script includes parameter-specific environment variables
-- Template files are automatically updated with parameter values
-- Job scripts are named: `job_batch_{batch_id}_param_{param_id}.sh`
-
-### Scaling Example
-
-For a configuration with:
-- 24 batches (MOF structures)
-- 81 parameter combinations (3×3×3×3)
-- Total jobs: 24 × 81 = **1,944 individual SLURM jobs**
-
-Each job processes one MOF structure with one parameter combination, providing maximum parallelization.
 
 ## Batch Splitting Strategies
 
