@@ -280,27 +280,26 @@ class JobScheduler:
                     
                     if 'variables' in template_config:
                         for var_key, var_value in template_config['variables'].items():
-                            script_content += f"export SIM_VAR_{var_key.upper()}=\"{var_value}\"\n"
+                            script_content += f"export SIM_VAR_{var_key}=\"{var_value}\"\n"
         
         # Export parameter-specific environment variables (only SIM_VAR_...)
         script_content += f"\n# Parameter combination {param_id}: {param_name}\n"
         script_content += f"export PARAM_ID={param_id}\n"
         script_content += f"export PARAM_NAME='{param_name}'\n"
-        # Export parameter values as SIM_VAR_ environment variables (for template processing)
+        # Export parameter values as PARAM_VAR_ environment variables (for template processing)
         parameters = param_combo['parameters']
         for param_key, param_value in parameters.items():
-            script_content += f"export SIM_VAR_{param_key.upper()}=\"{param_value}\"\n"
-        script_content += "\n"  
-        # Get sub-job output directory
-        sub_job_output_dir = self.parameter_matrix.get_sub_job_output_dir(batch_id, param_id)
-        
-        # Create output directory and batch list file
+            script_content += f"export PARAM_VAR_{param_key}=\"{param_value}\"\n"
+        script_content += "\n"
+        # Organize parameter combination results inside batch directory
+        batch_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
+        param_dir = os.path.join(batch_dir, param_name)
         script_content += f"# Create output directory for parameter combination {param_id}\n"
-        script_content += f"mkdir -p {sub_job_output_dir}\n"
-        script_content += f"cd {sub_job_output_dir}\n\n"
-        
+        script_content += f"mkdir -p {param_dir}\n"
+        script_content += f"cd {param_dir}\n\n"
+
         # Create parameter-specific batch list file
-        param_batch_list = os.path.join(sub_job_output_dir, "cif_file_list.txt")
+        param_batch_list = os.path.join(param_dir, "cif_file_list.txt")
         script_content += f"# Create list of CIF files for this parameter combination\n"
         script_content += f"cat > {param_batch_list} << 'EOF'\n"
         for cif_file in batch_files:
@@ -308,7 +307,7 @@ class JobScheduler:
         script_content += "EOF\n\n"
         
         # Generate workflow steps for this parameter combination
-        workflow_steps = self._generate_parameter_workflow_steps(batch_id, param_id, sub_job_output_dir, param_batch_list)
+        workflow_steps = self._generate_parameter_workflow_steps(batch_id, param_id, param_dir, param_batch_list)
         
         # Add workflow steps
         script_content += f"# Execute workflow for parameter combination {param_id}\n"
@@ -319,7 +318,7 @@ class JobScheduler:
         
         # Write final exit status
         script_content += f"\n# Write final exit status\n"
-        script_content += f"echo $? > {os.path.join(sub_job_output_dir, 'exit_status.log')}\n"
+        script_content += f"echo $? > {os.path.join(param_dir, 'exit_status.log')}\n"
         script_content += f"echo 'Parameter combination {param_id} completed at: ' `date`\n"
         
         # Write script to file
@@ -452,7 +451,7 @@ class JobScheduler:
                     
                     if 'variables' in template_config:
                         for var_key, var_value in template_config['variables'].items():
-                            script_content += f"export SIM_VAR_{var_key.upper()}=\"{var_value}\"\n"
+                            script_content += f"export SIM_VAR_{var_key}=\"{var_value}\"\n"
         
         script_content += "\n"
         
@@ -479,15 +478,15 @@ class JobScheduler:
             param_id = param_combo['param_id']
             param_name = param_combo['name']
             
-            # Get sub-job output directory
-            sub_job_output_dir = self.parameter_matrix.get_sub_job_output_dir(batch_id, param_id)
-            
+            # Organize parameter combination results inside batch directory
+            batch_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
+            param_dir = os.path.join(batch_dir, param_name)
             script_content += f"# Launch parameter combination {i+1}/{num_combinations}: {param_name}\n"
             script_content += f"echo 'Starting parameter combination {param_id}: {param_name}'\n"
-            script_content += f"mkdir -p {sub_job_output_dir}\n"
-            
+            script_content += f"mkdir -p {param_dir}\n"
+
             # Create parameter-specific batch list file
-            param_batch_list = os.path.join(sub_job_output_dir, "cif_file_list.txt")
+            param_batch_list = os.path.join(param_dir, "cif_file_list.txt")
             script_content += f"cp {batch_list_file} {param_batch_list}\n"
             
             # Launch sub-job in background
@@ -501,14 +500,14 @@ class JobScheduler:
                 script_content += f"    export PARAM_{param_key.upper()}={param_value}\n"
             
             # Generate workflow steps for this parameter combination
-            workflow_steps = self._generate_parameter_workflow_steps(batch_id, param_id, sub_job_output_dir, param_batch_list)
+            workflow_steps = self._generate_parameter_workflow_steps(batch_id, param_id, param_dir, param_batch_list)
             
             # Add workflow steps with proper indentation
             for line in workflow_steps.split('\n'):
                 if line.strip():
                     script_content += f"    {line}\n"
-            
-            script_content += f"    echo $? > {os.path.join(sub_job_output_dir, 'exit_status.log')}\n"
+
+            script_content += f"    echo $? > {os.path.join(param_dir, 'exit_status.log')}\n"
             script_content += f") &\n"
             script_content += f"SUB_PIDS[{i}]=$!\n"
             script_content += f"echo 'Parameter combination {param_id} started with PID ${SUB_PIDS[{i}]}'\n\n"
@@ -701,26 +700,33 @@ class JobScheduler:
                     template_vars = {}
                     if 'variables' in template_config:
                         for var_key, var_value in template_config['variables'].items():
-                            template_vars[f"SIM_VAR_{var_key.upper()}"] = var_value
+                            template_vars[f"SIM_VAR_{var_key}"] = var_value
                     
                     # Convert parameter matrix parameters to SIM_VAR_ environment variables
                     if self.parameter_matrix.is_enabled():
                         parameters = self.parameter_matrix.get_parameters_for_combination(param_id)
                         for param_key, param_value in parameters.items():
-                            # Convert parameter names to SIM_VAR_ format
-                            template_vars[f"SIM_VAR_{param_key.upper()}"] = param_value
+                            # Convert parameter names to PARAM_VAR_ format
+                            template_vars[f"PARAM_VAR_{param_key}"] = param_value
                     
                     # Apply all template variable substitutions using sed (same as standard script)
                     for var_name, var_value in template_vars.items():
-                        var_key = var_name.replace('SIM_VAR_', '')
-                        content += f"if grep -q \"^{var_key}\" ./{local_template}; then\n"
-                        content += f"  # Replace existing variable\n"
-                        content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
-                        content += f"else\n"
-                        content += f"  # Add variable if it doesn't exist\n"
-                        content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
-                        content += f"fi\n"
-                    
+                        if var_name.startswith('SIM_VAR_'):
+                            var_key = var_name.replace('SIM_VAR_', '')
+                            content += f"if grep -q \"^{var_key}\" ./{local_template}; then\n"
+                            content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
+                            content += f"else\n"
+                            content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
+                            content += f"fi\n"
+                        elif var_name.startswith('PARAM_VAR_'):
+                            # Handle PARAM_VAR_ variables similarly
+                            var_key = var_name.replace('PARAM_VAR_', '')
+                            # content += f"if grep -q \"^{var_key}\" ./{local_template}; then\n"
+                            # content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
+                            # content += f"else\n"
+                            # content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
+                            # content += f"fi\n"
+                        
                     template_env_var = f"$(pwd)/{local_template}"
                     content += f"export TEMPLATE_{step_name.upper()}_INPUT=\"{template_env_var}\"\n"
         
@@ -784,23 +790,32 @@ class JobScheduler:
                     template_vars = {}
                     if 'variables' in template_config:
                         for var_key, var_value in template_config['variables'].items():
-                            template_vars[f"SIM_VAR_{var_key.upper()}"] = var_value
+                            template_vars[f"SIM_VAR_{var_key}"] = var_value
                     
                     # Convert parameter matrix parameters to SIM_VAR_ environment variables
                     if self.parameter_matrix.is_enabled():
                         parameters = self.parameter_matrix.get_parameters_for_combination(param_id)
                         for param_key, param_value in parameters.items():
-                            # Convert parameter names to SIM_VAR_ format
-                            template_vars[f"SIM_VAR_{param_key.upper()}"] = param_value
+                            # Convert parameter names to PARAM_VAR_ format
+                            template_vars[f"PARAM_VAR_{param_key}"] = param_value
                     
                     # Apply all template variable substitutions using sed (same as bash approach)
                     for var_name, var_value in template_vars.items():
-                        var_key = var_name.replace('SIM_VAR_', '')
-                        content += f"if grep -q \"^{var_key}\" {template_full_path}; then\n"
-                        content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" {template_full_path}\n"
-                        content += f"else\n"
-                        content += f"  echo \"{var_key} {var_value}\" >> {template_full_path}\n"
-                        content += f"fi\n"
+                        if var_name.startswith('SIM_VAR_'):
+                            var_key = var_name.replace('SIM_VAR_', '')
+                            content += f"if grep -q \"^{var_key}\" {template_full_path}; then\n"
+                            content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" {template_full_path}\n"
+                            content += f"else\n"
+                            content += f"  echo \"{var_key} {var_value}\" >> {template_full_path}\n"
+                            content += f"fi\n"
+                        elif var_name.startswith('PARAM_VAR_'):
+                            # Handle PARAM_VAR_ variables similarly
+                            var_key = var_name.replace('PARAM_VAR_', '')
+                            # content += f"if grep -q \"^{var_key}\" {template_full_path}; then\n"
+                            # content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" {template_full_path}\n"
+                            # content += f"else\n"
+                            # content += f"  echo \"{var_key} {var_value}\" >> {template_full_path}\n"
+                            # content += f"fi\n"
                     
                     content += f"export TEMPLATE_{step_name.upper()}_INPUT=\"{template_full_path}\"\n"
         
@@ -909,7 +924,7 @@ class JobScheduler:
                     # Process variables specific to this template
                     if 'variables' in template_config:
                         for var_key, var_value in template_config['variables'].items():
-                            script_content += f"export SIM_VAR_{var_key.upper()}=\"{var_value}\"\n"
+                            script_content += f"export SIM_VAR_{var_key}=\"{var_value}\"\n"
 
         # Create a file with the list of CIF files for this batch
         batch_list_file = os.path.join(batch_output_dir, "cif_file_list.txt")
@@ -1111,12 +1126,12 @@ class JobScheduler:
                     content += f"# Simple variable replacement for template\n"
                     for var_key, var_value in template_config['variables'].items():
                         content += f"if grep -q \"^{var_key}\" ./{local_template}; then\n"
-                        content += f"  # Replace existing variable\n"
-                        content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
-                        content += f"else\n"
-                        content += f"  # Add variable if it doesn't exist\n"
-                        content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
-                        content += f"fi\n"
+                        # content += f"  # Replace existing variable\n"
+                        # content += f"  sed -i \"s/^{var_key}.*/{var_key} {var_value}/\" ./{local_template}\n"
+                        # content += f"else\n"
+                        # content += f"  # Add variable if it doesn't exist\n"
+                        # content += f"  echo \"{var_key} {var_value}\" >> ./{local_template}\n"
+                        # content += f"fi\n"
                     
                     # Update the template environment variable to point to the modified local template
                     content += f"export TEMPLATE_{step_name_upper}_INPUT=\"$(pwd)/{local_template}\"\n"
