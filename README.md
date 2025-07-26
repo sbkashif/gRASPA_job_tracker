@@ -24,8 +24,8 @@ The latest release introduces comprehensive **parameter matrix support** for con
 ```yaml
 parameter_matrix:
   parameters:
-    temperature: [298, 313, 333]
-    pressure: [100000, 200000, 500000]
+    temperature: [298, 313, 333] #K
+    pressure: "!eval np.logspace(-6,7,34).tolist()"  # Pa
     co2_molfraction: [0.15, 0.25, 0.35]
     n2_molfraction: [0.85, 0.75, 0.65]
   combinations: 'all'  # Creates 81 parameter combinations per batch
