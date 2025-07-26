@@ -1,0 +1,76 @@
+SimulationType                 MonteCarlo
+NumberOfCycles                 ${cycles}
+NumberOfInitializationCycles   ${initcycles}
+RandomSeed                    4444
+
+PrintEvery                    1000
+PrintPropertiesEvery          1000
+WriteBinaryRestartFileEvery   1000
+
+Movies                        yes
+WriteMoviesEvery              10000
+
+RestartFile                   no
+ContinueAfterCrash            no
+RemoveAtomNumberCodeFromLabel yes
+
+ChargeMethod                 Ewald
+Forcefield                   local
+CutOffVDW                   12.0
+EwaldPrecision              1e-6
+
+Framework                    0
+FrameworkName                ${framework_name}
+UnitCells                   1 1 1
+
+ExternalTemperature         ${temperature}
+ExternalPressure            ${pressure}
+
+Component 0 MoleculeName   NH3_TraPPE
+           MoleculeDefinition local
+           IdealGasRosenbluthWeight 1.0
+           BlockPockets        yes
+           BlockPocketsFilename LTA
+           TranslationProbability 1.0
+           RotationProbability    1.0
+           ReinsertionProbability 1.0
+           SwapProbability        1.0
+           ExtraFrameworkMolecule no
+           CreateNumberOfMolecules 0
+           MolFraction            ${nh3_molfraction}
+           FugacityCoefficient    PR-EOS
+
+Component 1 MoleculeName   N2_TraPPE
+           MoleculeDefinition local
+           IdealGasRosenbluthWeight 1.0
+           BlockPockets        yes
+           BlockPocketsFilename LTA
+           TranslationProbability 1.0
+           RotationProbability    1.0
+           ReinsertionProbability 1.0
+           SwapProbability        1.0
+           ExtraFrameworkMolecule no
+           CreateNumberOfMolecules 0
+           MolFraction            ${n2_molfraction}
+           FugacityCoefficient    PR-EOS
+
+Component 2 MoleculeName   H2_TraPPE
+           MoleculeDefinition local
+           IdealGasRosenbluthWeight 1.0
+           BlockPockets        yes
+           BlockPocketsFilename LTA
+           TranslationProbability 1.0
+           RotationProbability    1.0
+           ReinsertionProbability 1.0
+           SwapProbability        1.0
+           ExtraFrameworkMolecule no
+           CreateNumberOfMolecules 0
+           MolFraction            ${h2_molfraction}
+           FugacityCoefficient    PR-EOS
+
+Component 3 MoleculeName   sodium
+           MoleculeDefinition local
+           ExtraFrameworkMolecule yes
+           CreateNumberOfMolecules ${n_cations}
+           TranslationProbability 1.0
+           RandomTranslationProbability 1.0
