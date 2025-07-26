@@ -1,0 +1,82 @@
+# rules to overwrite
+0
+# number of defined interactions
+61
+# type      type2       interaction   # from Zhakisheva2024
+Si          Si          none
+Si          Al          none
+Si          O           none
+Si          Oa          none
+Si          Oaa         none
+Si          N_nh3       none
+Si          H_nh3       none
+Si          M_nh3       none
+Si          N_n2        none
+Si          M_n2        none
+Si          H2          FEYNMAN-HIBBS-LENNARD-JONES   28.256	1.854	1.867
+Si          Na          none
+Al          Al          none
+Al          O           none
+Al          Oa          none
+Al          Oaa         none
+Al          N_nh3       none
+Al          H_nh3       none
+Al          M_nh3       none
+Al          N_n2        none
+Al          M_n2        none
+Al          H2          FEYNMAN-HIBBS-LENNARD-JONES   26.51       1.99    1.862    #10.1021/acsami.0c20892
+Al          Na          none
+O           O           none
+Oa          Oa          none
+Oaa         Oaa         none
+O           N_nh3       lennard-jones      160.0        3.125
+Oa          N_nh3       lennard-jones      160.0        3.125
+Oaa         N_nh3       lennard-jones      160.0        3.125
+O           H_nh3       none
+Oa          H_nh3       none
+Oaa         H_nh3       none
+O           M_nh3       none
+Oa          M_nh3       none
+Oaa         M_nh3       none
+O           N_n2        lennard-jones       60.58       3.261
+Oa          N_n2        lennard-jones       60.58       3.261
+Oaa         N_n2        lennard-jones       60.58       3.261
+O           M_n2        none
+Oa          M_n2        none
+Oaa         M_n2        none
+O           H2          FEYNMAN-HIBBS-LENNARD-JONES    66.055	2.89	1.79
+Oa          H2          FEYNMAN-HIBBS-LENNARD-JONES    66.055	2.89	1.79
+Oaa         H2          FEYNMAN-HIBBS-LENNARD-JONES    66.055	2.89	1.79
+O           Na          lennard-jones      33.0           3.2
+Oa          Na          lennard-jones      33.0           3.2
+Oaa         Na          lennard-jones      33.0           3.2
+N_nh3       N_nh3       lennard-jones      185.0        3.42
+N_nh3       H_nh3       none
+N_nh3       M_nh3       none
+N_nh3       N_n2        lennard-jones      84.1732        3.363
+N_nh3       M_n2        none
+N_nh3       H2          lennard-jones      82.435     3.189
+N_nh3       Na          lennard-jones      225.568        2.766
+H_nh3       H_nh3       none
+H_nh3       M_nh3       none
+H_nh3       N_n2        none
+H_nh3       M_n2        none
+H_nh3       H2          none
+H_nh3       Na          none
+M_nh3       M_nh3       none
+M_nh3       N_n2        none
+M_nh3       M_n2        none
+M_nh3       H2          none
+M_nh3       Na          none
+N_n2        N_n2        lennard-jones     38.298	3.306
+N_n2        M_n2        none
+N_n2        H2          lennard-jones     37.507     3.132
+N_n2        Na          lennard-jones      225.568        2.766
+M_n2        M_n2        none
+M_n2        H2          none
+M_n2        Na          none
+H2          H2          FEYNMAN-HIBBS-LENNARD-JONES   	36.733	2.958	1
+H2          Na          FEYNMAN-HIBBS-LENNARD-JONES     220     3        1.84   #10.1021/acsami.0c20892
+Na          Na          lennard-jones      251.78         3.144
+# mixing rules to overwrite
+0

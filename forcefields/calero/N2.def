@@ -1,0 +1,23 @@
+# From NIST critical constants: Temperature [T], Pressure [Pa], and Acentric factor [-]
+126.192
+3395800.0
+0.0372
+#Number Of Atoms
+ 3
+# Number of groups
+1
+# CO2-group
+rigid
+# number of atoms
+3
+# atomic positions
+0 N_n2    0.0000      0.0000    0.0000
+1 N_n2    1.1       0.0000    0.0000
+2 M_n2    0.55      0.0       0.0
+# Chiral centers Bond  BondDipoles Bend  UrayBradley InvBend  Torsion Imp. Torsion Bond/Bond Stretch/Bend Bend/Bend Stretch/Torsion Bend/Torsion IntraVDW IntraCoulomb
+               0    2            0    0            0       0        0            0         0            0         0               0            0        0            0
+# Bond stretch: atom n1-n2, type, parameters
+0 2 RIGID_BOND
+1 2 RIGID_BOND
+# Number of config moves
+0
