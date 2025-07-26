@@ -2,6 +2,15 @@
 
 A Python package for generating large datasets of results from gRASPA simulations. This package is designed to facilitate the automated submission and tracking of multiple gRASPA jobs, and designing customized workflows from preprocessing to simulation to analysis.
 
+## Features
+
+- Configurable runs via a YAML configuration file
+- Divide the database into batches for parallel processing using various strategies
+- Customizable workflow by specifying paths to scripts. The workflow has been tested on a three-step sequential process: generate partial charges, run gRASPA simulations, and obtain adsorbate loadings.
+- Automated job submission to SLURM, tracking job status, and, optionally, resubmission of failed jobs.
+- [NEW] Conduct multi-dimensional parameter sweeps with automated job generation for each parameter combination
+
+
 ## 🚀 NEW RELEASE: Parameter Matrix Support (July 2025)
 
 ### Multi-Dimensional Parameter Sweeps
@@ -21,18 +30,7 @@ parameter_matrix:
     n2_molfraction: [0.85, 0.75, 0.65]
   combinations: 'all'  # Creates 81 parameter combinations per batch
 ```
-
 ---
-
-## Features
-
-- **Parameter Matrix Support**: Conduct multi-dimensional parameter sweeps with automated job generation for each parameter combination
-- Configurable runs via a YAML configuration file
-- Divide the database into batches for parallel processing using various strategies
-- Customizable workflow by specifying paths to scripts. The workflow has been tested on a three-step sequential process: generate partial charges, run gRASPA simulations, and obtain adsorbate loadings.
-- Automated job submission to SLURM, tracking job status, and, optionally, resubmission of failed jobs.
-
-
 ## Directory Structure
 
 The package uses a structured directory layout to organize scripts, results, and logs. The main directories are:
