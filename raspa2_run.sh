@@ -1,24 +1,32 @@
 #!/bin/bash
+
+# Ensure the script is run with bash
+if [ -z "$BASH_VERSION" ]; then
+    echo "This script must be run with bash, not sh."
+    exit 1
+fi
 set -e  # Exit immediately if a command exits with a non-zero status
+
+batch_id=$1
 
 # Parse command line arguments
 if [ "$#" -lt 2 ]; then
-  echo "Usage: $0 <batch_id> <input_dir> [output_dir] [template_file]"
+  echo "Usage: $0 <batch_id> <input_file_list> [output_dir] [template_file]"
   echo "  batch_id: Batch ID number"
-  echo "  input_dir: Directory containing input files (CIF files or partial charge results)"
+  echo "  input_file_list: File containing list of CIF files (one per line, full path)"
   echo "  output_dir: Optional - Output directory for simulation results (defaults to current directory)"
   echo "  template_file: Optional - Template file for simulation input"
   exit 1
 fi
 
 batch_id=$1
-input_dir=$2
+input_file_list=$2
 output_dir="${3:-.}"  # Use current directory if not specified
 template_file="${4:-}"  # Optional template file
 
 echo "=== RASPA Simulation Script ==="
 echo "Batch ID: $batch_id"
-echo "Input directory: $input_dir"
+echo "Input file list: $input_file_list"
 echo "Output directory: $output_dir"
 echo "Template file: $template_file"
 echo "==============================="
@@ -81,19 +89,27 @@ for var in $(env | grep '^FF_' | cut -d'=' -f1); do
     fi
 done
 
-# Copy CIF files from input directory
-echo "=== Copying CIF Files ==="
+
+# Copy only CIF files listed in input_file_list
+echo "=== Copying CIF Files Listed in File ==="
 cif_files_found=0
-for cif_file in "$input_dir"/*.cif; do
-    if [ -f "$cif_file" ]; then
-        cp -v "$cif_file" .
-        cif_files_found=1
-        echo "✅ Copied: $(basename $cif_file)"
-    fi
-done
+if [ -f "$input_file_list" ]; then
+    while IFS= read -r cif_path; do
+        if [ -f "$cif_path" ]; then
+            cp -v "$cif_path" .
+            cif_files_found=1
+            echo "✅ Copied: $(basename $cif_path)"
+        else
+            echo "⚠️  Warning: CIF file not found: $cif_path"
+        fi
+    done < "$input_file_list"
+else
+    echo "❌ CIF file list not found: $input_file_list"
+    exit 1
+fi
 
 if [ $cif_files_found -eq 0 ]; then
-    echo "❌ No CIF files found in input directory: $input_dir"
+    echo "❌ No CIF files found as listed in: $input_file_list"
     exit 1
 fi
 
@@ -105,11 +121,12 @@ if [ -n "$template_file" ] && [ -f "$template_file" ]; then
     
     # Apply variable substitutions from environment variables
     echo "=== Applying Variable Substitutions ==="
-    for var in $(env | grep '^SIM_VAR_' | cut -d'=' -f1); do
-        var_name=$(echo $var | sed 's/^SIM_VAR_//')
+    for var in $(env | grep '^PARAM_VAR_' | cut -d'=' -f1); do
+        var_name=$(echo $var | sed 's/^PARAM_VAR_//')
         var_value=${!var}
-        echo "Replacing \${$var_name} with $var_value"
-        sed -i "s|\${$var_name}|$var_value|g" simulation.input
+        echo "Replacing ${var_name} (case-insensitive) with ${var_value}"
+        # Use sed with # as delimiter, no unnecessary escaping, case-insensitive
+        sed -i "s#\${$var_name}#${var_value}#gI" simulation.input
     done
     
 elif [ -n "$TEMPLATE_SIMULATION_INPUT" ] && [ -f "$TEMPLATE_SIMULATION_INPUT" ]; then
@@ -118,11 +135,11 @@ elif [ -n "$TEMPLATE_SIMULATION_INPUT" ] && [ -f "$TEMPLATE_SIMULATION_INPUT" ];
     
     # Apply variable substitutions from environment variables
     echo "=== Applying Variable Substitutions ==="
-    for var in $(env | grep '^SIM_VAR_' | cut -d'=' -f1); do
-        var_name=$(echo $var | sed 's/^SIM_VAR_//')
+    for var in $(env | grep '^PARAM_VAR_' | cut -d'=' -f1); do
+        var_name=$(echo $var | sed 's/^PARAM_VAR_//')
         var_value=${!var}
-        echo "Replacing \${$var_name} with $var_value"
-        sed -i "s|\${$var_name}|$var_value|g" simulation.input
+        echo "Replacing ${var_name} with ${var_value}"
+        sed -i "s#\${$var_name}#${var_value}#g" simulation.input
     done
 else
     echo "❌ No simulation input template found. Please provide template_file or set TEMPLATE_SIMULATION_INPUT."
@@ -153,36 +170,46 @@ for cif_file in *.cif; do
         cp -v simulation.input "$base_name/"
         cp -v *.def "$base_name/" 2>/dev/null || echo "⚠️  Warning: No .def files found"
         
-        # Change to simulation directory
+        # verbose change to simulation directory
         cd "$base_name"
         
         # Update framework name in simulation.input
         if ! sed -i "s/^FrameworkName.*/FrameworkName $base_name/" simulation.input; then
             echo "❌ Failed to update FrameworkName in simulation.input for $base_name"
             failed_count=$((failed_count + 1))
+            echo $failed_count
             overall_success=1
             cd ..
             continue
         fi
-        
+        echo "✅ Updated FrameworkName in simulation.input for $base_name"
+        # Count the number of Al atoms in the CIF file
+        al_count=$(grep -c 'Al' "$cif_file" || true)
+        echo "Replacing \${n_cations} with $al_count in simulation.input"
+        sed -i "s#\${n_cations}#$al_count#g" simulation.input
+
         # Run simulation
         echo "Running RASPA simulation for $base_name..."
         start_time=$(date +%s)
         
-        if "$RASPA_DIR/simulate" > raspa_output.log 2>&1; then
-            end_time=$(date +%s)
-            elapsed_time=$((end_time - start_time))
+        "$RASPA_DIR/simulate" > raspa_output.log 2>&1
+        end_time=$(date +%s)
+        elapsed_time=$((end_time - start_time))
+        # Enhanced error checking: fail if 'Simulation completed on' is missing or 'error' appears in log
+        if grep -qi 'error' raspa_output.log; then
+            echo "❌ Simulation failed after $elapsed_time seconds (error found in log)"
+            echo "1" > exit_status.log
+            failed_count=$((failed_count + 1))
+            overall_success=1
+        elif grep -qi 'Simulation completed on' raspa_output.log; then
             echo "✅ Simulation completed successfully in $elapsed_time seconds"
             echo "0" > exit_status.log
         else
-            end_time=$(date +%s)
-            elapsed_time=$((end_time - start_time))
-            echo "❌ Simulation failed after $elapsed_time seconds"
+            echo "❌ Simulation failed after $elapsed_time seconds (no 'Simulation completed on' in log)"
             echo "1" > exit_status.log
             failed_count=$((failed_count + 1))
             overall_success=1
         fi
-        
         # Return to main directory
         cd ..
     fi
