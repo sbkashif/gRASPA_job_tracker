@@ -80,7 +80,7 @@ class ParameterMatrix:
             param_values = [self.parameters[key] for key in param_keys]
 
             molfraction_keys = [k for k in param_keys if k.lower().endswith('_molfraction')]
-            tol = 1e-6
+            tol = 1e-2
             idx = 0
             for combo in itertools.product(*param_values):
                 param_dict = dict(zip(param_keys, combo))
@@ -235,6 +235,3 @@ class ParameterMatrix:
             Number of sub-jobs (parameter combinations)
         """
         return len(self.param_combinations)
-    
-    # Note: Template parameter application is now handled by sed operations in job_scheduler.py
-    # Parameters are converted to SIM_VAR_ environment variables for consistent processing
