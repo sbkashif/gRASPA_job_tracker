@@ -7,12 +7,12 @@ from urllib.parse import urlparse
 from tqdm import tqdm
 from typing import Dict, List, Any, Set, Optional, Union, Tuple
 import pandas as pd
+import numpy as np
 
 from .batch_manager import BatchManager
 from .job_scheduler import JobScheduler
 
 class JobTracker:
-    """Track job progress and manage job submission"""
     
     def __init__(self, config: Dict[str, Any], batch_range: Optional[Tuple[int, int]] = None):
         """
@@ -31,11 +31,10 @@ class JobTracker:
         self.output_path = config['output']['output_dir']
         self.results_dir = config['output']['results_dir']
         
-        self.max_concurrent_jobs = config['batch'].get('max_concurrent_jobs', 1)
+        self.max_concurrent_jobs = config['submission'].get('max_concurrent_jobs', 1)
         
         # Control whether failed jobs should be resubmitted
-        self.resubmit_failed = config['batch'].get('resubmit_failed', False)
-        
+        self.resubmit_failed = config['submission'].get('resubmit_failed', False)
         # Initialize batch manager and job scheduler
         self.batch_manager = BatchManager(config)
         self.job_scheduler = JobScheduler(config, batch_range=batch_range)
@@ -49,6 +48,99 @@ class JobTracker:
         
         # Initialize or load job status tracking
         self._initialize_job_status()
+
+        
+    def recover_job_status(self):
+        """
+        Recover or reconstruct the job_status DataFrame if the job status file is missing or empty.
+        Populates all required columns, using 'NA' for fields that cannot be recovered.
+        This ensures downstream code expecting 'NA' or blank values works as intended.
+        """
+        print("[RECOVERY] Attempting to recover job status file...")
+        # Determine columns
+        base_columns = ['batch_id',
+                       'job_id',
+                       'param_combination_id',
+                       'status',
+                       'submission_time',
+                       'completion_time',
+                       'workflow_stage']
+
+        # Try to reconstruct from output directories and SLURM queue
+        recovered_rows = []
+        num_batches = self.batch_manager.get_num_batches()
+        param_matrix_enabled = self.job_scheduler.parameter_matrix.is_enabled()
+        param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations() if param_matrix_enabled else None
+
+        for batch_id in range(1, num_batches + 1):
+            if param_matrix_enabled:
+                for param_combo in param_combinations:
+                    param_id = param_combo['param_id']
+                    param_combo_id = self.job_scheduler.parameter_matrix.get_sub_job_name(batch_id, param_id)
+                    sub_job_output_dir = self.job_scheduler.parameter_matrix.get_sub_job_output_dir(batch_id, param_id)
+                    exit_status_file = os.path.join(sub_job_output_dir, 'exit_status.log')
+                    if os.path.exists(exit_status_file):
+                        try:
+                            with open(exit_status_file, 'r') as f:
+                                exit_status = f.read().strip()
+                            if exit_status == '0':
+                                status = 'COMPLETED'
+                            else:
+                                status = 'FAILED'
+                        except Exception:
+                            status = 'FAILED'
+                    else:
+                        status = 'NA'
+                    # Try to get job_id from SLURM queue (by job name)
+                    job_id = 'NA'
+                    submission_time = None
+                    completion_time = None
+                    workflow_stage = 'NA'
+                    recovered_rows.append({
+                        'batch_id': batch_id,
+                        'job_id': job_id,
+                        'param_combination_id': param_combo_id,
+                        'status': status,
+                        'submission_time': submission_time,
+                        'completion_time': completion_time,
+                        'workflow_stage': workflow_stage
+                    })
+            else:
+                batch_output_dir = os.path.join(self.results_dir, f'batch_{batch_id}')
+                exit_status_file = os.path.join(batch_output_dir, 'exit_status.log')
+                if os.path.exists(exit_status_file):
+                    try:
+                        with open(exit_status_file, 'r') as f:
+                            exit_status = f.read().strip()
+                        if exit_status == '0':
+                            status = 'COMPLETED'
+                        else:
+                            status = 'FAILED'
+                    except Exception:
+                        status = 'FAILED'
+                else:
+                    status = 'NA'
+                job_id = 'NA'
+                submission_time = None
+                completion_time = None
+                workflow_stage = 'NA'
+                row = {
+                    'batch_id': batch_id,
+                    'job_id': job_id,
+                    'status': status,
+                    'submission_time': submission_time,
+                    'completion_time': completion_time,
+                    'workflow_stage': workflow_stage
+                }
+                if param_matrix_enabled:
+                    row['param_combination_id'] = 'NA'
+                recovered_rows.append(row)
+
+        # Create DataFrame and set dtypes
+        self.job_status = pd.DataFrame(recovered_rows, columns=base_columns)
+        # Save to file
+        self.job_status.to_csv(self.job_status_file, index=False)
+        print(f"[RECOVERY] Recovered job status file with {len(self.job_status)} rows.")
     
     def _format_timestamp(self) -> pd.Timestamp:
         """
@@ -69,19 +161,15 @@ class JobTracker:
             self.job_status = pd.read_csv(self.job_status_file,
                                           parse_dates=['submission_time', 'completion_time'])
         else:
-            # Get base columns (workflow_stage will be added at the end)
-            base_columns = ['batch_id', 'job_id']
-            
-            # Add parameter combination column if parameter matrix is enabled (as 3rd column)
-            if self.job_scheduler.parameter_matrix.is_enabled():
-                base_columns.append('param_combination_id')
-            
-            # Add remaining columns
-            base_columns.extend(['status', 'submission_time', 'completion_time'])
-            
-            # Add workflow_stage at the end
-            base_columns.append('workflow_stage')
-            
+            base_columns = ['batch_id', 
+                            'job_id', 
+                            'param_combination_id',
+                            'status',
+                            'submission_time',
+                            'completion_time',
+                            'workflow_stage'
+                            ]
+
             self.job_status = pd.DataFrame(columns=base_columns)
             self.job_status.to_csv(self.job_status_file, index=False)
             
@@ -89,15 +177,12 @@ class JobTracker:
             dtype_dict = {
                 'batch_id': int,
                 'job_id': int,
+                'param_combination_id': str,
                 'status': str,
                 'submission_time': 'datetime64[ns]',
                 'completion_time': 'datetime64[ns]',
                 'workflow_stage': str
             }
-            
-            # Add parameter combination column dtype if parameter matrix is enabled
-            if self.job_scheduler.parameter_matrix.is_enabled():
-                dtype_dict['param_combination_id'] = str
             
             self.job_status = self.job_status.astype(dtype_dict)
         # Initialize failed batches list
@@ -109,12 +194,10 @@ class JobTracker:
             with open(self.failed_batches_file, 'w') as f:
                 pass
     
-    def _save_job_status_basic(self):
-        """Save current job status to file"""
-        self.job_status.to_csv(self.job_status_file, index=False)
-        
     def _save_job_status(self, retries=3):
-        """Save current job status to file with file locking to prevent conflicts"""
+        """
+        Save current job status to file with file locking to prevent conflicts
+        """
         import fcntl
         
         # Create a lock file
@@ -146,7 +229,9 @@ class JobTracker:
                     pass
     
     def _save_failed_batches(self):
-        """Save failed batches to file"""
+        """
+        Save failed batches to file
+        """
         with open(self.failed_batches_file, 'w') as f:
             for batch_id in self.failed_batches:
                 f.write(f"{batch_id}\n")
@@ -155,150 +240,165 @@ class JobTracker:
     def set_resubmit_failed(self, resubmit: bool):
         """
         Set whether failed jobs should be resubmitted
-        
+
         Args:
             resubmit: If True, failed jobs will be resubmitted
         """
+        # ...existing code...
         self.resubmit_failed = resubmit
         print(f"Resubmit failed jobs set to: {'Yes' if self.resubmit_failed else 'No'}")
     
     def _get_running_jobs(self) -> Set[str]:
-        """Get the set of currently running or pending job IDs and update status of completed jobs"""
+        """
+        Get the set of currently running or pending job IDs and update status of completed jobs, including repairing CANCELLED/FAILED jobs if output shows completion
+        """
         running_jobs = set()
         status_changes = False
         
         # Get all jobs currently in the scheduler queue (from system)
         queue_jobs = self.job_scheduler.get_queue_jobs()
         
-        # Filter for jobs with status 'RUNNING' or 'PENDING'
-        active_jobs = self.job_status[self.job_status['status'].isin(['RUNNING', 'PENDING'])]
+        # Check for active jobs like RUNNING and PENDING for status updates
+        # Also check jobs with status CANCELLED and FAILED for possible repair
+        jobs_to_check = self.job_status[self.job_status['status'].isin(['RUNNING', 'PENDING', 'CANCELLED', 'FAILED'])]
         
-        for _, job in active_jobs.iterrows():
-            job_id = str(job['job_id'])  # Ensure job_id is a string
-            batch_id = job['batch_id']   # Get batch_id directly from the current job row
-            current_status = job['status']  # Get current status to detect changes
-            
-            # Skip "dry-run" job IDs
-            if job_id == "dry-run":
-                mask = self.job_status['job_id'] == "dry-run"
+        for idx, job in jobs_to_check.iterrows():
+            job_id = str(job['job_id']) if pd.notna(job['job_id']) else np.nan
+            batch_id = job['batch_id']
+            param_id = job['param_combination_id'] if 'param_combination_id' in job else 'NA'
+            current_status = job['status']
+           
+            # Only update the row for this unique job_id
+            # Robust mask for job_id and param_combination_id, handling NaN and 'NA'
+            job_id_match = (self.job_status['job_id'] == job_id) | (self.job_status['job_id'].isna() & pd.isna(job_id))
+            if 'param_combination_id' in self.job_status.columns:
+                if (pd.isna(param_id) or param_id == 'NA'):
+                    param_id_match = self.job_status['param_combination_id'].isna() | (self.job_status['param_combination_id'] == 'NA')
+                else:
+                    param_id_match = self.job_status['param_combination_id'] == param_id
             else:
-                mask = self.job_status['job_id'] == int(job_id)
-                
-            # Get the batch_output_dir for this job
-            batch_output_dir = os.path.join(self.results_dir, f'batch_{batch_id}')
-            
+                param_id_match = True
+            mask = job_id_match & (self.job_status['batch_id'] == batch_id) & param_id_match
+            # Determine correct output directory for exit_status.log
+            if param_id != 'NA':
+                param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations()
+                param_name_to_combo = {combo['name']: combo for combo in param_combinations}
+                if '_' not in param_id:
+                    continue
+                param_name = param_id.split('_', 1)[1]
+                param_combo = param_name_to_combo.get(param_name)
+                if not param_combo:
+                    continue
+                sub_job_output_dir = self.job_scheduler.parameter_matrix.get_sub_job_output_dir(batch_id, param_combo['param_id'])
+                exit_status_file = os.path.join(sub_job_output_dir, 'exit_status.log')
+                output_dir_for_status = sub_job_output_dir
+            else:
+                batch_output_dir = os.path.join(self.results_dir, f'batch_{batch_id}')
+                exit_status_file = os.path.join(batch_output_dir, 'exit_status.log')
+                output_dir_for_status = batch_output_dir
+            # DEBUG: Print the exact exit_status_file path being checked
+            print(f"[DEBUG] Checking exit_status_file: {exit_status_file} for job_id={job_id}, param_id={param_id}")
             # Check if job is still in the queue
             if job_id != "dry-run" and job_id not in queue_jobs:
-                # Job is no longer in queue, check exit status file to determine if it succeeded
-                exit_status_file = os.path.join(batch_output_dir, 'exit_status.log')
-                
                 if os.path.exists(exit_status_file):
                     with open(exit_status_file, 'r') as f:
                         exit_status = f.read().strip()
                         if exit_status == '0':
                             new_status = 'COMPLETED'
-                            print(f"✅ Job {job_id} for batch {batch_id} completed successfully")
+                            print(f"✅ Job {job_id} for batch {batch_id}, param_id {param_id} completed successfully")
                         else:
-                            # Check if partial completion - look for completed steps
-                            new_status = self._check_partial_completion(batch_id, batch_output_dir)
+                            if param_id != 'NA':
+                                new_status = self._check_parameter_partial_completion(batch_id, param_combo['param_id'], output_dir_for_status)
+                            else:
+                                new_status = self._check_partial_completion(batch_id, output_dir_for_status)
                             if new_status == 'PARTIALLY_COMPLETE':
-                                print(f"⚠️ Job {job_id} for batch {batch_id} partially completed but failed at some step")
-                                # Don't add to failed_batches since it's partially complete
+                                print(f"⚠️ Job {job_id} for batch {batch_id}, param_id {param_id} partially completed but failed at some step")
                             else:
                                 new_status = 'FAILED'
                                 self.failed_batches.add(int(batch_id))
-                                print(f"❌ Job {job_id} for batch {batch_id} failed with exit status {exit_status}")
+                                print(f"❌ Job {job_id} for batch {batch_id}, param_id {param_id} failed with exit status {exit_status}")
                 else:
-                    # No exit status file but job is not in queue - check for partial completion
-                    new_status = self._check_partial_completion(batch_id, batch_output_dir)
+                    if param_id != 'NA':
+                        new_status = self._check_parameter_partial_completion(batch_id, param_combo['param_id'], output_dir_for_status)
+                    else:
+                        new_status = self._check_partial_completion(batch_id, output_dir_for_status)
                     if new_status == 'PARTIALLY_COMPLETE':
-                        print(f"⚠️ Job {job_id} for batch {batch_id} partially completed but failed at some step")
-                        # Don't add to failed_batches since it's partially complete
+                        print(f"⚠️ Job {job_id} for batch {batch_id}, param_id {param_id} partially completed but failed at some step")
                     else:
                         new_status = 'FAILED'
                         self.failed_batches.add(int(batch_id))
-                        print(f"❌ Job {job_id} for batch {batch_id} is not in queue and no exit status file found")
+                        print(f"❌ Job {job_id} for batch {batch_id}, param_id {param_id} is not in queue and no exit status file found")
             else:
-                # Job might still be in queue, use scheduler's status check
-                new_status = self.job_scheduler.get_job_status(job_id, batch_output_dir)
-            
+                new_status = self.job_scheduler.get_job_status(job_id, output_dir_for_status)
+
             # Update status if changed
-            if any(mask):  # Verify there are rows that match this job_id
-                if current_status != new_status:  # Status has changed
+            if any(mask): # Verify there are rows that match this job_id, param_id, and batch_id
+                if current_status != new_status:
                     self.job_status.loc[mask, 'status'] = new_status
-                    
-                    # Explicitly highlight status transitions with better messages
                     if current_status == 'PENDING' and new_status == 'RUNNING':
-                        print(f"📊 Job {job_id} for batch {batch_id} is now running")
+                        print(f"📊 Job {job_id} for batch {batch_id}, param_id {param_id} is now running")
                     elif new_status == 'COMPLETED':
-                        print(f"✅ Job {job_id} for batch {batch_id} completed successfully")
+                        print(f"✅ Job {job_id} for batch {batch_id}, param_id {param_id} completed successfully")
                     elif new_status == 'PARTIALLY_COMPLETE':
-                        print(f"⚠️ Job {job_id} for batch {batch_id} partially completed")
+                        print(f"⚠️ Job {job_id} for batch {batch_id}, param_id {param_id} partially completed")
                     elif new_status == 'FAILED':
-                        print(f"❌ Job {job_id} for batch {batch_id} failed")
+                        print(f"❌ Job {job_id} for batch {batch_id}, param_id {param_id} failed")
                     else:
                         print(f"Job {job_id} status changed: {current_status} → {new_status}")
-                    
-                    # Track that we had status changes to ensure we save the file
                     status_changes = True
                 else:
-                    # Status hasn't changed, just log current status (less verbose)
                     if current_status == 'RUNNING':
-                        print(f"Job {job_id} for batch {batch_id}: {new_status}")
+                        print(f"Job {job_id} for batch {batch_id}, param_id {param_id}: {new_status}")
                     else:
                         print(f"Job {job_id} status: {new_status}")
-                    
-                # Update workflow stage information for all jobs
+                # Update workflow stage information for this job only
                 if new_status in ['RUNNING', 'PENDING', 'COMPLETED', 'FAILED', 'PARTIALLY_COMPLETE']:
-                    # Get the current workflow stage using the job scheduler's method
                     workflow_stage = self.job_scheduler._get_current_workflow_stage(batch_id, new_status)
-                    
-                    # Only update if it's different from current value
                     current_workflow_stage = self.job_status.loc[mask, 'workflow_stage'].iloc[0] if not pd.isna(self.job_status.loc[mask, 'workflow_stage'].iloc[0]) else ""
                     if workflow_stage != current_workflow_stage:
                         self.job_status.loc[mask, 'workflow_stage'] = workflow_stage
-                        print(f"Updated workflow stage for batch {batch_id}: {current_workflow_stage} → {workflow_stage}")
+                        print(f"Updated workflow stage for batch {batch_id}, param_id {param_id}: {current_workflow_stage} → {workflow_stage}")
                         status_changes = True
-            
-            # Add to running jobs set if still active
             if new_status in ['RUNNING', 'PENDING']:
                 running_jobs.add(job_id)
             else:
-                # Job is no longer running, update completion time    
                 if new_status in ['COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'UNKNOWN', 'PARTIALLY_COMPLETE']:
-                    # Use formatted timestamp without fractional seconds
-                    completion_time = self._format_timestamp()
-                    self.job_status.loc[mask, 'completion_time'] = completion_time
-                    status_changes = True
-                    
-                    # Double-check exit status file to verify job completion status
-                    exit_status_file = os.path.join(self.results_dir, f'batch_{batch_id}', 'exit_status.log')
-                    
-                    if os.path.exists(exit_status_file):
-                        with open(exit_status_file, 'r') as f:
-                            exit_status = f.read().strip()
-                            if exit_status != '0':
-                                # Only add to failed batches if not partially complete
-                                if new_status != 'PARTIALLY_COMPLETE':
-                                    self.failed_batches.add(int(batch_id))
-                                    if new_status != 'FAILED':
-                                        print(f"⚠️ Updating status: Batch {batch_id} failed with exit code {exit_status}")
-                                        self.job_status.loc[mask, 'status'] = 'FAILED'
-                    elif new_status not in ['CANCELLED', 'PARTIALLY_COMPLETE']:
-                        # No exit status file and not cancelled means the job failed
-                        # Only add to failed batches if not partially complete
-                        if new_status != 'PARTIALLY_COMPLETE':
-                            self.failed_batches.add(int(batch_id))
-                            if new_status != 'FAILED':
-                                print(f"⚠️ Updating status: Batch {batch_id} failed - no exit status file")
-                                self.job_status.loc[mask, 'status'] = 'FAILED'
+                    if new_status != current_status:
+                        # Update completion time for terminal states
+                        completion_time = self._format_timestamp()
+                        self.job_status.loc[mask, 'completion_time'] = completion_time
+                        status_changes = True
+                        # get the exit status file for this job
+                        exit_status_file = os.path.join(output_dir_for_status, 'exit_status.log')
+                        if os.path.exists(exit_status_file):
+                            with open(exit_status_file, 'r') as f:
+                                exit_status = f.read().strip()
+                                if exit_status != '0':
+                                    if new_status != 'PARTIALLY_COMPLETE':
+                                        self.failed_batches.add(int(batch_id))
+                                        if new_status != 'FAILED':
+                                            print(f"⚠️ Updating status: Batch {batch_id}, param_id {param_id} failed with exit code {exit_status}")
+                                            self.job_status.loc[mask, 'status'] = 'FAILED'
+                        elif new_status not in ['CANCELLED', 'PARTIALLY_COMPLETE']:
+                            if new_status != 'PARTIALLY_COMPLETE':
+                                self.failed_batches.add(int(batch_id))
+                                if new_status != 'FAILED':
+                                    print(f"⚠️ Updating status: Batch {batch_id} failed - no exit status file")
+                                    self.job_status.loc[mask, 'status'] = 'FAILED'
                 else:
-                    print(f"⚠️ Unknown status for job {job_id}: {new_status}")
-                    # Use formatted timestamp without fractional seconds
-                    completion_time = self._format_timestamp()
-                    self.job_status.loc[mask, 'completion_time'] = completion_time
-                    status_changes = True
-                    
+                    print(f"⚠️ Unknown status for job {job_id}: {new_status}. Nothing will be updated")
+        # After all status checks, set jobs with no job_id/submission_time and not in active/terminal states to NEVER_SUBMITTED
+        # This includes jobs that are waiting to be submitted due to max concurrent jobs limit
+        never_submitted_mask = (
+            ~self.job_status['status'].isin([
+                'PENDING', 'RUNNING', 'FAILED', 'CANCELLED', 'COMPLETED', 'PARTIALLY_COMPLETE', 'TIMEOUT', 'UNKNOWN']) &
+            ((self.job_status['job_id'] == 'NA') | (self.job_status['job_id'].isna()) | (self.job_status['job_id'] == '')) &
+            ((self.job_status['submission_time'].isna()) | (self.job_status['submission_time'] == '') | (self.job_status['submission_time'] == 'NA'))
+        )
+        if never_submitted_mask.any():
+            self.job_status.loc[never_submitted_mask, 'status'] = 'NEVER_SUBMITTED'
+            status_changes = True
+
         # Final save of job status after processing all jobs
         if status_changes:
             print("Job status changes detected - updating CSV file")
@@ -307,22 +407,177 @@ class JobTracker:
         
         # Update parameter combination status if parameter matrix is enabled
         if self.job_scheduler.parameter_matrix.is_enabled():
-            self._update_parameter_combination_status()
-        
+            # Patch: For any job with status UNKNOWN or job_id NA, scan output dir for exit_status.log
+            param_entries = self.job_status[self.job_status['param_combination_id'] != 'NA']
+            # print(f"[PATCH-DEBUG] Checking {len(param_entries)} parameter matrix jobs for completion status...")
+            param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations()
+            param_name_to_combo = {combo['name']: combo for combo in param_combinations}
+            status_changes = False
+            # Get running jobs from SLURM queue by job name (g_<batch_id>_<param_index>)
+            slurm_running_jobs = self._get_slurm_running_jobs_by_name()
+            print(f"[DEBUG-RUNNING] SLURM running job names detected: {sorted(slurm_running_jobs)}")
+            for idx, param_entry in param_entries.iterrows():
+                batch_id = param_entry['batch_id']
+                param_combo_id = param_entry['param_combination_id']
+                job_id = str(param_entry['job_id'])
+                current_status = param_entry['status']
+                # Only update if status is not a terminal or active state (i.e., update if not COMPLETED, FAILED, PARTIALLY_COMPLETE, RUNNING, PENDING)
+                # This includes status == 'OTHER', 'UNKNOWN', or any custom/unexpected status
+                if current_status not in ['COMPLETED', 'FAILED', 'PARTIALLY_COMPLETE', 'RUNNING', 'PENDING'] or job_id == 'nan':
+                    if '_' not in param_combo_id:
+                        continue
+                    param_name = param_combo_id.split('_', 1)[1]
+                    param_combo = param_name_to_combo.get(param_name)
+                    if not param_combo:
+                        continue
+                    param_id = param_combo['param_id']
+                    print(f"[DEBUG-RUNNING] param_id for {param_combo_id} is '{param_id}'")
+                    slurm_job_name = f"g_{batch_id}_p{param_id}"
+                    print(f"[DEBUG-RUNNING] Checking if SLURM job name '{slurm_job_name}' is running for param_combo_id {param_combo_id}")
+                    is_running = slurm_job_name in slurm_running_jobs
+                    param_output_dir = os.path.join(self.results_dir, f"batch_{batch_id}", param_name)
+                    # Get workflow steps from config
+                    workflow_steps = []
+                    if 'workflow' in self.config and self.config['workflow']:
+                        workflow_steps = [step.get('name', f'step_{i+1}') for i, step in enumerate(self.config['workflow'])]
+                    elif 'scripts' in self.config and self.config['scripts']:
+                        workflow_steps = list(self.config['scripts'].keys())
+                    if not workflow_steps:
+                        continue
+                    all_steps_completed = True
+                    all_steps_found = True
+                    failed_steps = []
+                    # --- Determine current workflow stage ---
+                    current_stage = None
+                    for step in workflow_steps:
+                        step_dir = os.path.join(param_output_dir, step)
+                        exit_status_file = os.path.join(step_dir, 'exit_status.log')
+                        # If the step's exit_status.log does not exist or is not '0', this is the current stage
+                        if not os.path.exists(exit_status_file):
+                            current_stage = step
+                            all_steps_found = False
+                            break
+                        try:
+                            with open(exit_status_file, 'r') as f:
+                                exit_status = f.read().strip()
+                                if exit_status != '0':
+                                    current_stage = step
+                                    all_steps_completed = False
+                                    failed_steps.append(step)
+                                    break
+                        except Exception as e:
+                            current_stage = step
+                            all_steps_completed = False
+                            failed_steps.append(step)
+                            break
+                    # If all steps are completed, set to last step (should be marked completed anyway)
+                    if current_stage is None and workflow_steps:
+                        current_stage = workflow_steps[-1]
+                    # Defensive: never allow workflow_stage to be anything except a config step or 'completed', 'failed', etc.
+                    if current_stage not in workflow_steps:
+                        current_stage = workflow_steps[0] if workflow_steps else 'unknown'
+                    new_status = current_status
+                    workflow_stage = param_entry['workflow_stage']
+                    if is_running:
+                        new_status = 'RUNNING'
+                        #get slurm id from slurm job name
+                        job_id = self._get_slurm_job_id_by_name(slurm_job_name)
+                        if job_id and job_id != 'dry-run' and job_id != 'NA':
+                            print(f"[PATCH-DEBUG] Found SLURM job ID {job_id} for job name {slurm_job_name}")
+                            running_jobs.add(job_id)
+                        workflow_stage = current_stage if current_stage else 'unknown'
+                        batch_id_str = str(batch_id)
+                        param_combo_id_str = str(param_combo_id)
+                        print(f"[PATCH-DEBUG] batch_id={batch_id} (type {type(batch_id)}), param_combo_id={param_combo_id} (type {type(param_combo_id)})")
+                        print(f"[PATCH-DEBUG] DataFrame batch_id dtype: {self.job_status['batch_id'].dtype}, param_combination_id dtype: {self.job_status['param_combination_id'].dtype}")
+                        mask = (self.job_status['batch_id'].astype(str) == batch_id_str) & (self.job_status['param_combination_id'].astype(str) == param_combo_id_str)
+                        print(f"[PATCH-DEBUG] Attempting to update job status for batch_id={batch_id_str}, param_combo_id={param_combo_id_str}, mask sum={mask.sum()}")
+                        if mask.any():
+                            if new_status != current_status or workflow_stage != param_entry['workflow_stage']:
+                                self.job_status.loc[mask, 'status'] = new_status
+                                self.job_status.loc[mask, 'workflow_stage'] = workflow_stage
+                                self.job_status.loc[mask, 'completion_time'] = pd.NaT
+                                print(f"[PATCH-DEBUG] Updated job status to RUNNING for batch_id={batch_id_str}, param_combo_id={param_combo_id_str}, workflow_stage={workflow_stage}")
+                                status_changes = True
+                        else:
+                            print(f"[PATCH-DEBUG] No rows matched for update: batch_id={batch_id_str}, param_combo_id={param_combo_id_str}")
+                    elif all_steps_found:
+                        if all_steps_completed:
+                            new_status = 'COMPLETED'
+                            workflow_stage = 'completed'
+                        elif failed_steps:
+                            new_status = 'FAILED'
+                            workflow_stage = 'failed'
+                        else:
+                            new_status = 'PARTIALLY_COMPLETE'
+                            workflow_stage = 'partially_complete'
+                        mask = (self.job_status['batch_id'] == batch_id) & (self.job_status['param_combination_id'] == param_combo_id)
+                        if new_status != current_status or workflow_stage != param_entry['workflow_stage']:
+                            self.job_status.loc[mask, 'status'] = new_status
+                            self.job_status.loc[mask, 'workflow_stage'] = workflow_stage
+                            if new_status in ['COMPLETED', 'FAILED', 'PARTIALLY_COMPLETE']:
+                                completion_time = self._format_timestamp()
+                                self.job_status.loc[mask, 'completion_time'] = completion_time
+                            status_changes = True
+
+            # After all parameter matrix jobs checked, save if any status changes
+            if status_changes:
+                print("[PATCH] Parameter matrix job status changes detected - updating CSV file")
+                print(f"[PATCH-DEBUG] Saving job_status DataFrame with {len(self.job_status)} rows.")
+                self._save_job_status()
+        breakpoint()
         return running_jobs
+
+    def _get_slurm_running_jobs_by_name(self):
+        """
+        Returns a set of SLURM job names (e.g., g_1_237) for jobs that are RUNNING or PENDING in the queue.
+        """
+        # ...existing code...
+        import subprocess
+        job_names = set()
+        try:
+            result = subprocess.run(['squeue', '-u', os.environ.get('USER', ''), '-o', '%j'], capture_output=True, text=True, check=True)
+            for line in result.stdout.splitlines():
+                name = line.strip()
+                if name and name != 'NAME':
+                    job_names.add(name)
+        except Exception as e:
+            print(f"[PATCH] Could not query SLURM job names: {e}")
+        return job_names
+
+    def _get_slurm_job_id_by_name(self, job_name: str) -> Optional[str]:
+        """
+        Get the SLURM job ID for a given job name.
+        
+        Args:
+            job_name: The name of the SLURM job (e.g., g_1_237)
+        
+        Returns:
+            The SLURM job ID as a string, or None if not found
+        """
+        try:
+            result = subprocess.run(['squeue', '-u', os.environ.get('USER', ''), '-o', '%i %j'], capture_output=True, text=True, check=True)
+            for line in result.stdout.splitlines():
+                parts = line.strip().split()
+                if len(parts) == 2 and parts[1] == job_name:
+                    return parts[0]
+        except Exception as e:
+            print(f"[PATCH] Could not get SLURM job ID for {job_name}: {e}")
+        return None
     
     def _check_partial_completion(self, batch_id: int, batch_output_dir: str) -> str:
         """
         Check if a job was partially completed by looking for exit status log files
         in each workflow step directory.
-        
+
         Args:
             batch_id: The batch ID to check
             batch_output_dir: Path to the batch output directory
-            
+
         Returns:
             'PARTIALLY_COMPLETE' if partial completion detected, 'FAILED' otherwise
         """
+        # ...existing code...
         # Get workflow steps from the config
         workflow_steps = []
         
@@ -389,54 +644,42 @@ class JobTracker:
         """
         Update the status of individual parameter combinations by checking their output directories
         """
+        # ...existing code...
         status_changes = False
-        
+
         # Get all parameter combination entries (those with param_combination_id)
         if not self.job_scheduler.parameter_matrix.is_enabled():
             return
-            
-        param_entries = self.job_status[self.job_status['param_combination_id'].notna()]
-        
+
+        param_entries = self.job_status[self.job_status['param_combination_id'] != 'NA']
         if param_entries.empty:
             return
-        
+
+        param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations()
+        param_name_to_combo = {combo['name']: combo for combo in param_combinations}
+
         for _, param_entry in param_entries.iterrows():
             batch_id = param_entry['batch_id']
             current_status = param_entry['status']
             param_combo_id = param_entry['param_combination_id']
-            
-            # Skip if already completed or failed
-            if current_status in ['COMPLETED', 'FAILED']:
+            job_id = str(param_entry['job_id'])
+
+            # Always check, even if status is CANCELLED or OTHER
+            # Extract parameter name from param_combination_id (format: B{batch_id}_{param_name})
+            if '_' not in param_combo_id:
                 continue
-            
-            # Extract parameter ID from param_combination_id (format: B{batch_id}_{param_name})
-            # For example: B1_T298_P100000_CO20.15_N20.85
-            param_name = param_combo_id.split('_', 1)[1]  # Remove B{batch_id}_ prefix
-            
-            # Find matching parameter combination by name
-            param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations()
-            param_combo = None
-            for combo in param_combinations:
-                if combo['name'] == param_name:
-                    param_combo = combo
-                    break
-            
+            param_name = param_combo_id.split('_', 1)[1]
+            param_combo = param_name_to_combo.get(param_name)
             if not param_combo:
                 continue
-            
             param_id = param_combo['param_id']
-            
-            # Get the output directory for this parameter combination
             sub_job_output_dir = self.job_scheduler.parameter_matrix.get_sub_job_output_dir(batch_id, param_id)
-            
             if not os.path.exists(sub_job_output_dir):
                 continue
-            
-            # Check exit status file
             exit_status_file = os.path.join(sub_job_output_dir, 'exit_status.log')
             new_status = current_status
-            workflow_stage = 'unknown'
-            
+            workflow_stage = param_entry.get('workflow_stage', 'unknown') if hasattr(param_entry, 'get') else param_entry['workflow_stage']
+
             if os.path.exists(exit_status_file):
                 try:
                     with open(exit_status_file, 'r') as f:
@@ -452,37 +695,42 @@ class JobTracker:
                             else:
                                 new_status = 'FAILED'
                                 workflow_stage = 'failed'
-                except:
+                except Exception as e:
+                    print(f"Error reading exit_status for param combo {param_combo_id}: {e}")
                     new_status = 'FAILED'
                     workflow_stage = 'failed'
             else:
-                # Check if job is still running by checking SLURM queue
-                job_id = str(param_entry['job_id'])
+                # Check if job is still running or pending by checking SLURM queue and status
                 if job_id != "dry-run" and not job_id.startswith("dry-run-"):
-                    queue_jobs = self.job_scheduler.get_queue_jobs()
-                    if job_id in queue_jobs:
-                        new_status = 'RUNNING'
-                        workflow_stage = 'running'
+                    # Use SLURM status to check for cancellation
+                    slurm_status = self.job_scheduler.get_job_status(job_id)
+                    if slurm_status in ['CANCELLED', 'CANCELLED+']:  # SLURM may append +
+                        new_status = 'CANCELLED'
+                        workflow_stage = 'cancelled'
                     else:
-                        new_status = 'FAILED'
-                        workflow_stage = 'failed'
-            
-            # Update status if changed
-            if new_status != current_status:
-                # Create mask to find this specific parameter combination
-                mask = (self.job_status['batch_id'] == batch_id) & (self.job_status['job_id'] == param_entry['job_id'])
-                
+                        queue_jobs = self.job_scheduler.get_queue_jobs()
+                        if job_id in queue_jobs:
+                            new_status = 'RUNNING'
+                            workflow_stage = 'running'
+                        elif slurm_status in ['PENDING', 'CONFIGURING', 'COMPLETING', 'SUSPENDED']:
+                            new_status = slurm_status
+                            workflow_stage = slurm_status.lower()
+                        else:
+                            # If not running, not pending, not cancelled, and no exit_status.log, mark as FAILED
+                            new_status = 'FAILED'
+                            workflow_stage = 'failed'
+
+            # Update status if changed or if status is CANCELLED/OTHER but should be COMPLETED
+            mask = (self.job_status['batch_id'] == batch_id) & (self.job_status['param_combination_id'] == param_combo_id)
+            if (new_status != current_status) or (current_status not in ['COMPLETED', 'FAILED', 'PARTIALLY_COMPLETE', 'RUNNING', 'PENDING'] and new_status == 'COMPLETED'):
                 self.job_status.loc[mask, 'status'] = new_status
                 self.job_status.loc[mask, 'workflow_stage'] = workflow_stage
-                
                 if new_status in ['COMPLETED', 'FAILED', 'PARTIALLY_COMPLETE']:
                     completion_time = self._format_timestamp()
                     self.job_status.loc[mask, 'completion_time'] = completion_time
-                
-                param_name = param_combo['name']
                 print(f"Parameter combination {param_name} (batch {batch_id}): {current_status} → {new_status}")
                 status_changes = True
-        
+
         # Save if any changes were made
         if status_changes:
             self._save_job_status()
@@ -490,15 +738,16 @@ class JobTracker:
     def _check_parameter_partial_completion(self, batch_id: int, param_id: int, sub_job_output_dir: str) -> str:
         """
         Check if a parameter combination job was partially completed
-        
+
         Args:
             batch_id: The batch ID
             param_id: The parameter combination ID
             sub_job_output_dir: Path to the parameter combination output directory
-            
+
         Returns:
             'PARTIALLY_COMPLETE' if partial completion detected, 'FAILED' otherwise
         """
+        # ...existing code...
         # Get workflow steps from the config
         workflow_steps = []
         
@@ -547,18 +796,19 @@ class JobTracker:
     def get_parameter_matrix_status_summary(self, batch_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Get a summary of parameter matrix job status
-        
+
         Args:
             batch_id: Optional batch ID to filter results. If None, returns summary for all batches
-            
+
         Returns:
             Dictionary containing status summary
         """
+        # ...existing code...
         if not self.job_scheduler.parameter_matrix.is_enabled():
             return {"error": "Parameter matrix is not enabled"}
         
         # Get parameter entries (those with param_combination_id)
-        param_entries = self.job_status[self.job_status['param_combination_id'].notna()]
+        param_entries = self.job_status[self.job_status['param_combination_id'] != 'NA']
         
         # Filter by batch_id if specified
         if batch_id is not None:
@@ -583,9 +833,12 @@ class JobTracker:
         
         completion_percentage = (completed_combinations / total_combinations * 100) if total_combinations > 0 else 0
         
+        # Always report all parameter columns in job_status, except for base columns
+        base_cols = ['batch_id', 'job_id', 'status', 'submission_time', 'completion_time', 'param_combination_id']
+        parameter_columns = [col for col in self.job_status.columns if col not in base_cols]
         summary = {
             "total_parameter_combinations": total_combinations,
-            "parameter_columns": list(self.job_scheduler.parameter_matrix.parameters.keys()),
+            "parameter_columns": parameter_columns,
             "status_breakdown": {
                 "completed": completed_combinations,
                 "failed": failed_combinations,
@@ -630,64 +883,70 @@ class JobTracker:
         return summary
     
     def _get_next_batch_id(self) -> int:
-        """Get the next batch ID to process"""
-        # Get all batch IDs that are currently being processed (any status except FAILED)
-        # MODIFIED: Don't consider FAILED jobs as in progress when resubmitting
-        if self.resubmit_failed:
-            in_progress_batch_ids = set(self.job_status[~self.job_status['status'].isin(['FAILED'])]['batch_id'])
-        else:
-            in_progress_batch_ids = set(self.job_status['batch_id'])
-        
-        # First, try to process any failed batches if resubmission is enabled
-        if self.resubmit_failed and self.failed_batches:
-            # Filter failed batches by the specified range if applicable
-            if self.batch_range:
-                min_batch, max_batch = self.batch_range
-                filtered_failed_batches = [b for b in self.failed_batches if 
-                                          (min_batch is None or b >= min_batch) and 
-                                          (max_batch is None or b <= max_batch)]
-                
-                # Only consider failed batches that aren't currently in progress
-                available_failed_batches = [b for b in filtered_failed_batches if b not in in_progress_batch_ids]
-                
-                if available_failed_batches:
-                    # ADDED: Improved logging
-                    print(f"Found {len(available_failed_batches)} failed batches eligible for resubmission")
-                    return min(available_failed_batches)
-            else:
-                # Only consider failed batches that aren't currently in progress
-                available_failed_batches = [b for b in self.failed_batches if b not in in_progress_batch_ids]
-                if available_failed_batches:
-                    # ADDED: Improved logging
-                    print(f"Found {len(available_failed_batches)} failed batches eligible for resubmission")
-                    return min(available_failed_batches)
-        
-        # Then, find the next batch that hasn't been processed or isn't in progress
+        """
+        Get the next batch ID to process, including resubmission of FAILED/CANCELLED jobs if enabled.
+        """
+        # ...existing code...
         total_batches = self.batch_manager.get_num_batches()
-        for batch_id in range(1, total_batches + 1):
-            # Skip if batch is outside the specified range
-            if self.batch_range:
-                min_batch, max_batch = self.batch_range
-                if (min_batch is not None and batch_id < min_batch) or \
-                   (max_batch is not None and batch_id > max_batch):
-                    continue
-                    
-            # Check if this batch is already being processed
-            if batch_id not in in_progress_batch_ids:
+        batch_ids = range(1, total_batches + 1)
+        if self.batch_range:
+            min_batch, max_batch = self.batch_range
+            batch_ids = [b for b in batch_ids if (min_batch is None or b >= min_batch) and (max_batch is None or b <= max_batch)]
+
+        # If resubmitting failed, prioritize batches with FAILED or CANCELLED jobs
+        if self.resubmit_failed:
+            failed_or_cancelled = self.job_status[self.job_status['status'].isin(['FAILED', 'CANCELLED'])]
+            for batch_id in batch_ids:
+                if not failed_or_cancelled[failed_or_cancelled['batch_id'] == batch_id].empty:
+                    return batch_id
+
+        # Otherwise, find the next batch with jobs that are NEVER_SUBMITTED or UNKNOWN
+        for batch_id in batch_ids:
+            jobs = self.job_status[self.job_status['batch_id'] == batch_id]
+            if any(jobs['status'].isin(['NEVER_SUBMITTED', 'UNKNOWN'])):
                 return batch_id
-        
-        # If we've already submitted jobs for all batches in the range
+
+        # If all jobs are processed or no eligible jobs found
         return -1
+
+    def get_jobs_to_submit(self, batch_id):
+        """
+        Return the indices of jobs in the given batch that should be submitted.
+        If resubmit_failed is True, include FAILED and CANCELLED jobs for resubmission.
+        Otherwise, only include NEVER_SUBMITTED and UNKNOWN jobs.
+        """
+        # ...existing code...
+        jobs = self.job_status[self.job_status['batch_id'] == batch_id]
+        if self.resubmit_failed:
+            eligible_statuses = ['NEVER_SUBMITTED', 'UNKNOWN', 'FAILED', 'CANCELLED']
+        else:
+            eligible_statuses = ['NEVER_SUBMITTED', 'UNKNOWN']
+        return jobs[jobs['status'].isin(eligible_statuses)].index.tolist()
+
+    def mark_jobs_for_resubmission(self, batch_id):
+        """
+        Reset FAILED and CANCELLED jobs in the batch to NEVER_SUBMITTED for resubmission.
+        """
+        # ...existing code...
+        if not self.resubmit_failed:
+            return
+        mask = (self.job_status['batch_id'] == batch_id) & (self.job_status['status'].isin(['FAILED', 'CANCELLED']))
+        if mask.any():
+            self.job_status.loc[mask, ['job_id', 'submission_time', 'completion_time']] = ['NA', None, None]
+            self.job_status.loc[mask, 'status'] = 'NEVER_SUBMITTED'
+            print(f"Reset {mask.sum()} FAILED/CANCELLED jobs in batch {batch_id} for resubmission.")
+            self._save_job_status()
     
     def prepare_environment(self) -> bool:
         """
         Prepare the environment for job submission:
         - Check if database is available or download it
         - Create batches if they don't exist
-        
+
         Returns:
             True if preparation was successful, False otherwise
         """
+        # ...existing code...
         print("\n=== Preparing Environment ===")
         
         # Step 1: Check database status
@@ -881,6 +1140,9 @@ class JobTracker:
             True if a job was submitted, False otherwise
         """
         running_jobs = self._get_running_jobs()
+        if not running_jobs:
+            print("No running jobs found. Proceeding to submit next job.")
+            running_jobs = set()
         
         # Check if we can submit more jobs
         if len(running_jobs) >= self.max_concurrent_jobs:
@@ -892,23 +1154,14 @@ class JobTracker:
         if next_batch_id == -1:
             # No more batches to process
             return False
-            
-        # Double check that this batch isn't already in progress (just to be safe)
+        # Reset FAILED/CANCELLED jobs for resubmission if needed
+        self.mark_jobs_for_resubmission(next_batch_id)
         batch_jobs = self.job_status[self.job_status['batch_id'] == next_batch_id]
-        
-        # For resubmission of failed jobs, we need to clear the existing entries
-        # MODIFIED: If job is failed and we're resubmitting, remove from job_status first
-        if self.resubmit_failed and next_batch_id in self.failed_batches and not batch_jobs.empty:
-            if all(status == 'FAILED' for status in batch_jobs['status']):
-                print(f"Removing failed job entries for batch {next_batch_id} to enable resubmission")
-                self.job_status = self.job_status[self.job_status['batch_id'] != next_batch_id]
-                batch_jobs = self.job_status[self.job_status['batch_id'] == next_batch_id]  # Should now be empty
-        
-        if not batch_jobs.empty:
-            active_jobs = batch_jobs[batch_jobs['status'].isin(['PENDING', 'RUNNING'])]
-            if not active_jobs.empty:
-                print(f"⚠️ Batch {next_batch_id} already has active jobs. Skipping to prevent duplicates.")
-                return False
+        # if not batch_jobs.empty:
+        #     active_jobs = batch_jobs[batch_jobs['status'].isin(['PENDING', 'RUNNING'])]
+        #     if not active_jobs.empty:
+        #         print(f"⚠️ Batch {next_batch_id} already has active jobs. Skipping to prevent duplicates.")
+        #         return False
         
         # Get the files for the batch
         try:
@@ -939,57 +1192,65 @@ class JobTracker:
         
         # Submit the job - pass batch_id to store the relationship
         print(f"Submitting job for batch {next_batch_id} with {len(batch_files)} CIF files...")
-        
+        breakpoint()
         # Check if parameter matrix is enabled
         if self.job_scheduler.parameter_matrix.is_enabled():
             # For parameter matrix, submit individual jobs for each parameter combination
             param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations()
             
-            print(f"Parameter matrix enabled: submitting {len(param_combinations)} individual jobs")
-            
-            # Create individual job scripts
-            coordinator_script = self.job_scheduler.create_job_script(next_batch_id, batch_files)
+            breakpoint()
             
             # Submit individual jobs for each parameter combination  
             submitted_jobs = []
             for param_combo in param_combinations:
                 param_id = param_combo['param_id']
                 param_name = param_combo['name']
-                
+
                 # Create individual job script path
                 param_script_path = os.path.join(
-                    self.job_scheduler.scripts_dir, 
+                    self.job_scheduler.scripts_dir,
                     f'job_batch_{next_batch_id}_param_{param_id}.sh'
                 )
-                
+
                 # Submit individual parameter job
                 print(f"Submitting parameter combination {param_id}: {param_name}")
                 param_job_id = self.job_scheduler.submit_job(param_script_path, dry_run=dry_run, batch_id=next_batch_id)
-                
+
                 if param_job_id:
-                    submitted_jobs.append((param_job_id, param_combo))
-                    
-                    # Create parameter combination ID with batch prefix
-                    param_combo_id = self.job_scheduler.parameter_matrix.get_sub_job_name(next_batch_id, param_id)
-                    
-                    # Create base job status entry with parameter combination ID
-                    param_row = {
-                        'batch_id': int(next_batch_id),
-                        'job_id': int(param_job_id) if param_job_id != "dry-run" else f"dry-run-{param_id}",
-                        'param_combination_id': param_combo_id,
-                        'status': 'PENDING' if param_job_id != "dry-run" else "DRY-RUN",
-                        'submission_time': self._format_timestamp(),
-                        'completion_time': None,
-                        'workflow_stage': 'pending'
-                    }
-                    
-                    # Ensure all columns exist and fill missing ones with None
-                    for col in self.job_status.columns:
-                        if col not in param_row:
-                            param_row[col] = None
-                    
-                    param_df = pd.DataFrame([param_row], columns=self.job_status.columns)
-                    self.job_status = pd.concat([self.job_status, param_df], ignore_index=True)
+                    # Validate job_id: must be int or 'dry-run', never cluster name or other string
+                    valid_job_id = False
+                    if param_job_id == "dry-run":
+                        job_id_value = "dry-run"
+                        valid_job_id = True
+                    else:
+                        try:
+                            job_id_value = int(param_job_id)
+                            valid_job_id = True
+                        except Exception:
+                            print(f"❌ Invalid job_id returned for param_id {param_id}: {param_job_id}. Skipping row.")
+                            valid_job_id = False
+
+                    if valid_job_id:
+                        submitted_jobs.append((param_job_id, param_combo))
+                        # Create parameter combination ID with batch prefix
+                        param_combo_id = self.job_scheduler.parameter_matrix.get_sub_job_name(next_batch_id, param_id)
+                        param_row = {
+                            'batch_id': int(next_batch_id),
+                            'job_id': job_id_value,
+                            'param_combination_id': param_combo_id,
+                            'status': 'PENDING' if param_job_id != "dry-run" else "DRY-RUN",
+                            'submission_time': self._format_timestamp(),
+                            'completion_time': None,
+                            'workflow_stage': 'pending'
+                        }
+                        # Ensure all columns exist and fill missing ones with None
+                        for col in self.job_status.columns:
+                            if col not in param_row:
+                                param_row[col] = None
+                        param_df = pd.DataFrame([param_row], columns=self.job_status.columns)
+                        self.job_status = pd.concat([self.job_status, param_df], ignore_index=True)
+                    else:
+                        print(f"⚠️ Skipped writing job status for param_id {param_id} due to invalid job_id.")
                 else:
                     print(f"⚠️ Failed to submit parameter combination {param_id}")
             
@@ -1007,6 +1268,7 @@ class JobTracker:
                 new_row = {
                     'batch_id': int(next_batch_id),
                     'job_id': int(job_id) if job_id != "dry-run" else "dry-run",
+                    'param_combination_id': 'NA',  # No parameter combination for single job
                     'status': 'PENDING' if job_id != "dry-run" else "DRY-RUN",
                     'submission_time': self._format_timestamp(),
                     'completion_time': None,
@@ -1065,10 +1327,10 @@ class JobTracker:
         import subprocess
         
         # Identify batches with multiple active jobs
-        batch_groups = self.job_status.groupby('batch_id')
+        batch_groups = self.job_status.groupby(['batch_id', 'param_combination_id'])
         problematic_batches = []
         
-        for batch_id, group in batch_groups:
+        for (batch_id, param_combo_id), group in batch_groups:
             active_jobs = group[group['status'].isin(['PENDING', 'RUNNING'])]
             if len(active_jobs) > 1:
                 problematic_batches.append((batch_id, len(active_jobs)))
@@ -1139,7 +1401,7 @@ class JobTracker:
                 print("🔄 Resubmission of failed jobs is ENABLED")
             else:
                 print("ℹ️ Resubmission of failed jobs is DISABLED")
-        
+        breakpoint()
         print("=== Starting gRASPA Job Tracker ===")
         print(f"Output path: {self.output_path}")
         print(f"Maximum concurrent jobs: {self.max_concurrent_jobs}")
@@ -1171,27 +1433,38 @@ class JobTracker:
             print("⚠️ No batches found to process. Exiting.")
             return
         
-        # Get a set of processed batch IDs for more accurate counting
-        processed_batch_ids = set(self.job_status['batch_id'])
+        # Determine processed batches more accurately for resubmission
+        processed_batch_ids = set()
+        for batch_id in range(1, total_batches + 1):
+            jobs = self.job_status[self.job_status['batch_id'] == batch_id]
+            if jobs.empty:
+                continue
+            # If resubmit_failed: only consider batch processed if all jobs are COMPLETED or PARTIALLY_COMPLETE
+            if self.resubmit_failed:
+                if all(jobs['status'].isin(['COMPLETED', 'PARTIALLY_COMPLETE'])):
+                    processed_batch_ids.add(batch_id)
+            else:
+                # Legacy: any entry means processed
+                processed_batch_ids.add(batch_id)
+
         processed_batches = len(processed_batch_ids)
-        
         if processed_batches > 0:
             print(f"ℹ️ Found {processed_batches} previously processed batches")
-        
+
         # Count failed batches that aren't already in the processed list
         new_failed_batches = self.failed_batches - processed_batch_ids
-        
+
         # Calculate remaining batches correctly
         unprocessed_batches = total_batches - processed_batches
         retry_batches = len(new_failed_batches)
         remaining_batches = unprocessed_batches + retry_batches
-        
+
         if remaining_batches == 0:
             print("✅ All batches have already been processed. Nothing to do.")
             if self.failed_batches:
                 print(f"⚠️ There are {len(self.failed_batches)} failed batches that can be retried.")
             return
-        
+
         # Provide more detailed information about batches to process
         if retry_batches > 0:
             print(f"ℹ️ Will process {unprocessed_batches} new batches and retry {retry_batches} failed batches")
@@ -1216,6 +1489,7 @@ class JobTracker:
 
                 # Then get current running jobs
                 running_jobs = self._get_running_jobs()
+        
                 if running_jobs:
                     print(f"Currently running jobs: {len(running_jobs)}")
                     for job_id in running_jobs:
@@ -1235,6 +1509,10 @@ class JobTracker:
                             else:
                                 print(f"  - Unknown batch: Job ID {job_id}")
                 
+                else:
+                    print("No currently running jobs. Will try to submit new jobs.")
+                    running_jobs = []
+                breakpoint()
                 # Try to submit new jobs if needed
                 jobs_submitted = 0
                 while len(running_jobs) + jobs_submitted < self.max_concurrent_jobs:
@@ -1261,9 +1539,62 @@ class JobTracker:
             print("\n\nJob tracker interrupted by user. Currently running jobs will continue.")
             
         print("\n=== Job Tracker Finished ===")
+        # --- Always use unified parameter matrix summary ---
+        # For standard jobs, param_combination_id is 'NA', other parameter columns are blank
+        summary = self.get_parameter_matrix_status_summary_unified()
+        print("\n=== Unified Job Status Summary ===")
+        if 'error' in summary:
+            print(summary['error'])
+        else:
+            print(f"Total jobs: {summary['total_parameter_combinations']}")
+            print(f"Parameter columns: {summary['parameter_columns']}")
+            print(f"Status breakdown: {summary['status_breakdown']}")
+            print(f"Workflow stage breakdown: {summary['workflow_stage_breakdown']}")
+            print(f"Completion percentage: {summary['completion_percentage']}%")
+            print(f"Success rate: {summary['success_rate']}%")
+
         print(f"Job status saved to: {self.job_status_file}")
         if self.failed_batches:
             print(f"Failed batches saved to: {self.failed_batches_file}")
+    def get_parameter_matrix_status_summary_unified(self, batch_id: Optional[int] = None) -> dict:
+        """
+        Always return a unified summary for all jobs (parameter matrix or standard).
+        For standard jobs, param_combination_id is 'NA', other parameter columns are blank.
+        """
+        # Use all jobs, not just param matrix
+        entries = self.job_status.copy()
+        # Ensure param_combination_id is 'NA' for standard jobs
+        if 'param_combination_id' in entries.columns:
+            entries['param_combination_id'] = entries['param_combination_id'].fillna('NA')
+        # Filter by batch_id if specified
+        if batch_id is not None:
+            entries = entries[entries['batch_id'] == batch_id]
+        if entries.empty:
+            return {"error": "No jobs found"}
+        # Count statuses
+        status_counts = entries['status'].value_counts().to_dict()
+        workflow_stage_counts = entries['workflow_stage'].value_counts().to_dict() if 'workflow_stage' in entries.columns else {}
+        total_jobs = len(entries)
+        completed = status_counts.get('COMPLETED', 0)
+        completion_percentage = (completed / total_jobs * 100) if total_jobs > 0 else 0
+        # Always report all parameter columns except base columns
+        base_cols = ['batch_id', 'job_id', 'status', 'submission_time', 'completion_time', 'param_combination_id']
+        parameter_columns = [col for col in entries.columns if col not in base_cols]
+        summary = {
+            "total_parameter_combinations": total_jobs,
+            "parameter_columns": parameter_columns,
+            "status_breakdown": {
+                "completed": completed,
+                "failed": status_counts.get('FAILED', 0),
+                "partially_complete": status_counts.get('PARTIALLY_COMPLETE', 0),
+                "running": status_counts.get('RUNNING', 0),
+                "pending": status_counts.get('PENDING', 0)
+            },
+            "workflow_stage_breakdown": workflow_stage_counts,
+            "completion_percentage": round(completion_percentage, 2),
+            "success_rate": round((completed / total_jobs * 100), 2) if total_jobs > 0 else 0
+        }
+        return summary
     
     def run_single_cif(self, cif_path, dry_run=False):
         """
@@ -1388,10 +1719,13 @@ class JobTracker:
                 }
                 
                 # Create a new DataFrame with correct types and append
+                # Ensure all columns are present, including param_combination_id
+                for col in self.job_status.columns:
+                    if col not in new_row:
+                        new_row[col] = None
                 new_df = pd.DataFrame([new_row], columns=self.job_status.columns).astype(self.job_status.dtypes)
                 self.job_status = pd.concat([self.job_status, new_df], ignore_index=True)
                 self._save_job_status()
-                
                 return True
             else:
                 print("❌ Job submission failed")
