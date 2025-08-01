@@ -684,14 +684,15 @@ def main():
         if args.update_status:
             print("=== Status Update Mode - Scanning batch status without submitting jobs ===")
             tracker = JobTracker(config, batch_range=batch_range)
-            
             try:
+                if tracker.job_status.empty:
+                    tracker.recover_job_status()
                 tracker.clean_job_status()
                 running_jobs = tracker._get_running_jobs()
-                
+
                 print("\n=== Updating Workflow Stages ===")
                 fixed_count = 0
-                
+
                 # We'll use the job scheduler's method for workflow stage detection
                 # This avoids hardcoding and handles all cases appropriately
                 for idx, row in tracker.job_status.iterrows():
@@ -699,27 +700,27 @@ def main():
                     job_id = row['job_id']
                     status = row['status']
                     current_workflow_stage = row['workflow_stage'] if not pd.isna(row['workflow_stage']) else ""
-                    
+
                     # Get batch output directory to use for detecting workflow stage
                     batch_output_dir = os.path.join(tracker.results_dir, f'batch_{batch_id}')
-                    
+
                     # Use job scheduler's method to determine current workflow stage
                     # This method already handles all statuses correctly including COMPLETED, FAILED, etc.
                     new_workflow_stage = tracker.job_scheduler._get_current_workflow_stage(batch_id, status)
-                    
+
                     # Only update if different from current value
                     if new_workflow_stage != current_workflow_stage:
                         tracker.job_status.loc[idx, 'workflow_stage'] = new_workflow_stage
                         print(f"Updated workflow stage for batch {batch_id}: {current_workflow_stage or '(empty)'} → {new_workflow_stage}")
                         fixed_count += 1
-                
+
                 # Save the job status if we made any changes
                 if fixed_count > 0:
                     print(f"Updated workflow stage for {fixed_count} jobs")
                     tracker._save_job_status()
                 else:
                     print("No workflow stage updates needed")
-                
+
                 print("\n=== Job Status Update Summary ===")
                 if tracker.job_status.empty:
                     print("No jobs found in tracking file.")
@@ -733,14 +734,14 @@ def main():
                               if status not in ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED'])
                     if other > 0:
                         print(f"OTHER:     {other}")
-                
+
                 print(f"\nJob status saved to: {tracker.job_status_file}")
                 if tracker.failed_batches:
                     print(f"Failed batches saved to: {tracker.failed_batches_file}")
                     print(f"Total failed batches: {len(tracker.failed_batches)}")
-                    
+
                 print("✅ Status update completed successfully")
-                
+
             except Exception as e:
                 print(f"⚠️ Error updating status: {e}")
                 if os.environ.get("DEBUG"):
