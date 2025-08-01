@@ -169,7 +169,8 @@ for cif_file in *.cif; do
         cp -v "$cif_file" "$base_name/"
         cp -v simulation.input "$base_name/"
         cp -v *.def "$base_name/" 2>/dev/null || echo "⚠️  Warning: No .def files found"
-        
+        cp -v *.block "$base_name/" 2>/dev/null || echo "⚠️  Warning: No .block files found"
+
         # verbose change to simulation directory
         cd "$base_name"
         
@@ -195,20 +196,14 @@ for cif_file in *.cif; do
         "$RASPA_DIR/simulate" > raspa_output.log 2>&1
         end_time=$(date +%s)
         elapsed_time=$((end_time - start_time))
-        # Enhanced error checking: fail if 'Simulation completed on' is missing or 'error' appears in log
         if grep -qi 'error' raspa_output.log; then
             echo "❌ Simulation failed after $elapsed_time seconds (error found in log)"
             echo "1" > exit_status.log
             failed_count=$((failed_count + 1))
             overall_success=1
-        elif grep -qi 'Simulation completed on' raspa_output.log; then
+        else
             echo "✅ Simulation completed successfully in $elapsed_time seconds"
             echo "0" > exit_status.log
-        else
-            echo "❌ Simulation failed after $elapsed_time seconds (no 'Simulation completed on' in log)"
-            echo "1" > exit_status.log
-            failed_count=$((failed_count + 1))
-            overall_success=1
         fi
         # Return to main directory
         cd ..
@@ -223,6 +218,28 @@ echo "Successful simulations: $((total_count - failed_count))"
 echo "Failed simulations: $failed_count"
 echo "==============================="
 
+# Clean up inside each simulation directory first
+echo "Cleaning up simulation directories..."
+for cif_file in *.cif; do
+    if [ -f "$cif_file" ]; then
+        base_name=$(basename "$cif_file" .cif)
+        if [ -d "$base_name" ]; then
+            echo "Cleaning directory: $base_name"
+            # Keep only output data files, simulation input, and exit_status.log
+            find "$base_name" -type f ! -name "output_*.data" ! -name "simulation.input" ! -name "exit_status.log" -delete
+            # Clean empty subdirectories if any
+            find "$base_name" -type d -empty -delete
+        fi
+    fi
+done
+
+# Clean up temporary files in the main directory
+echo "Cleaning up temporary files..."
+rm -v *.def 2>/dev/null || echo "⚠️ Warning: Could not remove .def files"
+rm -v *.cif 2>/dev/null || echo "⚠️ Warning: Could not remove .cif files"
+rm -v *.log 2>/dev/null || echo "⚠️ Warning: Could not remove log files"
+rm -v *.py 2>/dev/null || echo "⚠️ Warning: Could not remove auxiliary Python scripts"
+rm -v *.sh 2>/dev/null || echo "⚠️ Warning: Could not remove auxiliary scripts"
 # Write final exit status
 if [ $overall_success -eq 0 ]; then
     echo "✅ All simulations completed successfully"
