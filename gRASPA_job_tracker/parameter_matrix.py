@@ -198,7 +198,9 @@ class ParameterMatrix:
         """
         results_dir = self.config['output']['results_dir']
         sub_job_name = self.get_sub_job_name(batch_id, param_id)
-        return os.path.join(results_dir, sub_job_name)
+        #get the name after the batch prefix
+        sub_job_name = sub_job_name.split('_', 1)[1]
+        return os.path.join(results_dir, f'batch_{batch_id}', sub_job_name)
     
     def get_parameters_for_combination(self, param_id: int) -> Dict[str, Any]:
         """
