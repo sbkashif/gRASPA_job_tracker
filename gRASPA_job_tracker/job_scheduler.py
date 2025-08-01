@@ -1728,22 +1728,37 @@ class JobScheduler:
         # Update specific job if provided
         if job_id and batch_id:
             batch_id_str = str(batch_id)
+            # Validate job_id: must be int or 'dry-run', never cluster name or other string
+            valid_job_id = False
+            if job_id == "dry-run":
+                valid_job_id = True
+            else:
+                try:
+                    _ = int(job_id)
+                    valid_job_id = True
+                except Exception:
+                    print(f"❌ Invalid job_id in update_job_status_csv for batch {batch_id}: {job_id}. Skipping row.")
+                    valid_job_id = False
+
+            if not valid_job_id:
+                return  # Do not write invalid job_id to CSV
+
             status = self.get_job_status(job_id)
-            
+
             # Get batch output directory to check for exit_status.log
             batch_output_dir = os.path.join(self.config['output']['results_dir'], f'batch_{batch_id}')
             if os.path.exists(batch_output_dir):
                 status = self.get_job_status(job_id, batch_output_dir)
-            
+
             # Get the workflow stage - always calculate this
             workflow_stage = self._get_current_workflow_stage(batch_id, status)
-            
+
             # Update or add entry
             if batch_id_str in job_data:
                 job_data[batch_id_str][1] = job_id
                 job_data[batch_id_str][2] = status
                 job_data[batch_id_str][5] = workflow_stage  # Always set workflow_stage
-                
+
                 # Update completion time if job is completed and no completion time is set
                 if status in ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'UNKNOWN'] and not job_data[batch_id_str][4]:
                     job_data[batch_id_str][4] = self._format_datetime(time.time())
