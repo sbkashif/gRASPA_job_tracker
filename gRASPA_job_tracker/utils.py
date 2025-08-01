@@ -85,7 +85,6 @@ def get_hardcoded_default_config() -> Dict[str, Any]:
             'slurm_template': os.path.join(current_dir, 'templates', 'slurm_template.sh'),
         },
         'slurm_config': {
-            'account': 'your_account',
             'partition': 'normal',
             'time': '24:00:00',
             'nodes': 1,
