@@ -212,7 +212,7 @@ class ConfigParser:
         self._validate_templates()
 
         # Validate slurm config
-        required_slurm_fields = ['account', 'partition', 'time', 'nodes']
+        required_slurm_fields = ['partition', 'time', 'nodes']
         for field in required_slurm_fields:
             if field not in self.config['slurm_config']:
                 raise ValueError(f"Missing required SLURM configuration field: {field}")
