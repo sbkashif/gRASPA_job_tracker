@@ -26,7 +26,7 @@ UnitCells                   1 1 1
 ExternalTemperature         ${temperature}
 ExternalPressure            ${pressure}
 
-Component 0 MoleculeName   NH3_TraPPE
+Component 0 MoleculeName   NH3
            MoleculeDefinition local
            IdealGasRosenbluthWeight 1.0
            BlockPockets        yes
@@ -40,7 +40,7 @@ Component 0 MoleculeName   NH3_TraPPE
            MolFraction            ${nh3_molfraction}
            FugacityCoefficient    PR-EOS
 
-Component 1 MoleculeName   N2_TraPPE
+Component 1 MoleculeName   N2
            MoleculeDefinition local
            IdealGasRosenbluthWeight 1.0
            BlockPockets        yes
@@ -54,7 +54,7 @@ Component 1 MoleculeName   N2_TraPPE
            MolFraction            ${n2_molfraction}
            FugacityCoefficient    PR-EOS
 
-Component 2 MoleculeName   H2_TraPPE
+Component 2 MoleculeName   H2
            MoleculeDefinition local
            IdealGasRosenbluthWeight 1.0
            BlockPockets        yes
