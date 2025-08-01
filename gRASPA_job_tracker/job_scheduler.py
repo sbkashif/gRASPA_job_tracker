@@ -1960,7 +1960,7 @@ class JobScheduler:
         try:
             if scheduler_type == "slurm":
                 # Get all jobs from squeue
-                result = subprocess.run(['squeue', '-h', '-o', '%i'], 
+                result = subprocess.run(['squeue', '-h', '-u', os.environ.get('USER', ''), '-o', '%i'], 
                                       stdout=subprocess.PIPE, 
                                       stderr=subprocess.PIPE,
                                       universal_newlines=True)
