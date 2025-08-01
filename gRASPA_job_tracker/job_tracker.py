@@ -1192,19 +1192,19 @@ class JobTracker:
         
         # Submit the job - pass batch_id to store the relationship
         print(f"Submitting job for batch {next_batch_id} with {len(batch_files)} CIF files...")
-        breakpoint()
         # Check if parameter matrix is enabled
         if self.job_scheduler.parameter_matrix.is_enabled():
             # For parameter matrix, submit individual jobs for each parameter combination
             param_combinations = self.job_scheduler.parameter_matrix.get_parameter_combinations()
             
-            breakpoint()
             
             # Submit individual jobs for each parameter combination  
             submitted_jobs = []
             for param_combo in param_combinations:
                 param_id = param_combo['param_id']
                 param_name = param_combo['name']
+
+                param_batch_combo = f"B{next_batch_id}_{param_name}"
 
                 # Create individual job script path
                 param_script_path = os.path.join(
@@ -1214,45 +1214,59 @@ class JobTracker:
 
                 # Submit individual parameter job
                 print(f"Submitting parameter combination {param_id}: {param_name}")
-                param_job_id = self.job_scheduler.submit_job(param_script_path, dry_run=dry_run, batch_id=next_batch_id)
 
-                if param_job_id:
-                    # Validate job_id: must be int or 'dry-run', never cluster name or other string
-                    valid_job_id = False
-                    if param_job_id == "dry-run":
-                        job_id_value = "dry-run"
-                        valid_job_id = True
-                    else:
-                        try:
-                            job_id_value = int(param_job_id)
+                # Robust comparison: cast to str and strip whitespace
+                param_col = self.job_status['param_combination_id'].astype(str).str.strip()
+                param_batch_combo_str = str(param_batch_combo).strip()
+                mask = (self.job_status['batch_id'] == next_batch_id) & (param_col == param_batch_combo_str)
+                # Debug print for mismatches
+                if not mask.any():
+                    print(f"[DEBUG] No match for param_combination_id: '{param_batch_combo_str}' in DataFrame. First few values:")
+                    print(param_col.head())
+                existing_jobs = self.job_status[mask]
+                
+                #there should only be one job per parameter combination
+                assert len(existing_jobs) <= 1, f"Multiple jobs found for parameter combination {param_batch_combo} in batch {next_batch_id}"
+                if not existing_jobs.empty and not existing_jobs['status'].isin(['RUNNING', 'PENDING', 'COMPLETED']).any():
+                    param_job_id = self.job_scheduler.submit_job(param_script_path, dry_run=dry_run, batch_id=next_batch_id)
+               
+                    if param_job_id:
+                        # Validate job_id: must be int or 'dry-run', never cluster name or other string
+                        valid_job_id = False
+                        if param_job_id == "dry-run":
+                            job_id_value = "dry-run"
                             valid_job_id = True
-                        except Exception:
-                            print(f"❌ Invalid job_id returned for param_id {param_id}: {param_job_id}. Skipping row.")
-                            valid_job_id = False
+                        else:
+                            try:
+                                job_id_value = int(param_job_id)
+                                valid_job_id = True
+                            except Exception:
+                                print(f"❌ Invalid job_id returned for param_id {param_id}: {param_job_id}. Skipping row.")
+                                valid_job_id = False
 
-                    if valid_job_id:
-                        submitted_jobs.append((param_job_id, param_combo))
-                        # Create parameter combination ID with batch prefix
-                        param_combo_id = self.job_scheduler.parameter_matrix.get_sub_job_name(next_batch_id, param_id)
-                        param_row = {
-                            'batch_id': int(next_batch_id),
-                            'job_id': job_id_value,
-                            'param_combination_id': param_combo_id,
-                            'status': 'PENDING' if param_job_id != "dry-run" else "DRY-RUN",
-                            'submission_time': self._format_timestamp(),
-                            'completion_time': None,
-                            'workflow_stage': 'pending'
-                        }
-                        # Ensure all columns exist and fill missing ones with None
-                        for col in self.job_status.columns:
-                            if col not in param_row:
-                                param_row[col] = None
-                        param_df = pd.DataFrame([param_row], columns=self.job_status.columns)
-                        self.job_status = pd.concat([self.job_status, param_df], ignore_index=True)
+                        if valid_job_id:
+                            submitted_jobs.append((param_job_id, param_combo))
+                            # Create parameter combination ID with batch prefix
+                            param_combo_id = self.job_scheduler.parameter_matrix.get_sub_job_name(next_batch_id, param_id)
+                            param_row = {
+                                'batch_id': int(next_batch_id),
+                                'job_id': job_id_value,
+                                'param_combination_id': param_combo_id,
+                                'status': 'PENDING' if param_job_id != "dry-run" else "DRY-RUN",
+                                'submission_time': self._format_timestamp(),
+                                'completion_time': None,
+                                'workflow_stage': 'pending'
+                            }
+                            # Ensure all columns exist and fill missing ones with None
+                            for col in self.job_status.columns:
+                                if col not in param_row:
+                                    param_row[col] = None
+                            param_df = pd.DataFrame([param_row], columns=self.job_status.columns)
+                            self.job_status = pd.concat([self.job_status, param_df], ignore_index=True)
+                        else:
+                            print(f"⚠️ Skipped writing job status for param_id {param_id} due to invalid job_id.")
                     else:
-                        print(f"⚠️ Skipped writing job status for param_id {param_id} due to invalid job_id.")
-                else:
-                    print(f"⚠️ Failed to submit parameter combination {param_id}")
+                        print(f"⚠️ Failed to submit parameter combination {param_id}")
             
             success = len(submitted_jobs) > 0
             if success:
