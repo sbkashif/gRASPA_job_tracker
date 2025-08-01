@@ -1,7 +1,7 @@
 # rules to overwrite
 0
 # number of defined interactions
-61
+75
 # type      type2       interaction   # from Zhakisheva2024
 Si          Si          none
 Si          Al          none
