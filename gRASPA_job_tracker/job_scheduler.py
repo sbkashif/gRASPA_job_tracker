@@ -1203,7 +1203,6 @@ class JobScheduler:
         # Remove the explicit exit call for mps_run but keep for other scripts
         # This fixes the premature job termination issue
         if 'mps_run' in script_path:
-            # Just return without exit but store the status for the workflow
             content += f"# Avoid exit for simulation scripts to prevent premature job termination\n"
             content += f"simulation_status=$script_status\n"
         else:
@@ -1377,6 +1376,7 @@ class JobScheduler:
             print(f"[DRY RUN] To submit manually: sbatch {script_path}")
             return "dry-run"
         
+        import re
         try:
             print(f"Submitting job script: {script_path}")
             result = subprocess.run(['sbatch', script_path], 
@@ -1384,26 +1384,34 @@ class JobScheduler:
                                    stdout=subprocess.PIPE, 
                                    stderr=subprocess.PIPE,
                                    universal_newlines=True)
-            # Extract job ID from sbatch output (usually something like "Submitted batch job 123456")
+            # Extract job ID from sbatch output (robustly handle cluster name)
             output = result.stdout.strip()
+            job_id = None
             if "Submitted batch job" in output:
-                job_id = output.split()[-1]
-                print(f"Job submitted successfully with ID: {job_id}")
-                
-                # Store batch_id to job_id mapping if batch_id is provided
-                if batch_id is not None:
-                    self.batch_job_map[job_id] = batch_id
-                    self._save_batch_job_map()
-                    
-                    # Update the job status CSV file with the new job
-                    self.update_job_status_csv(job_id=job_id, batch_id=batch_id, 
-                                             force_resubmission=force_resubmission)
-                    
-                return job_id        
-            
+                # Use regex to extract the first integer after 'Submitted batch job'
+                match = re.search(r"Submitted batch job (\d+)", output)
+                if match:
+                    job_id = match.group(1)
+                else:
+                    # Fallback: try to find any integer in the output
+                    match = re.search(r"(\d+)", output)
+                    if match:
+                        job_id = match.group(1)
+                if job_id:
+                    print(f"Job submitted successfully with ID: {job_id}")
+                    # Store batch_id to job_id mapping if batch_id is provided
+                    if batch_id is not None:
+                        self.batch_job_map[job_id] = batch_id
+                        self._save_batch_job_map()
+                        # Update the job status CSV file with the new job
+                        self.update_job_status_csv(job_id=job_id, batch_id=batch_id, 
+                                                 force_resubmission=force_resubmission)
+                    return job_id
+                else:
+                    print(f"❌ Could not parse job ID from sbatch output: {output}")
+                    return None
             print(f"Job submission output: {output}")
             return None
-            
         except subprocess.CalledProcessError as e:
             print(f"Failed to submit job: {e}")
             print(f"stderr: {e.stderr}")
