@@ -1542,6 +1542,9 @@ class JobScheduler:
             
         if status == "FAILED":
             return "failed"
+        
+        if status == "NEVER_SUBMITTED":
+            return "never_submitted"
             
         if status == "PARTIALLY_COMPLETE":
             # For partially complete jobs, find the last completed step using exit status files
@@ -1643,7 +1646,6 @@ class JobScheduler:
                     # Check for RASPA log files to determine simulation progress
                     import glob
                     raspa_logs = glob.glob(os.path.join(step_dir, '**', 'Output', 'System_0', '*.data'), recursive=True)
-                    
                     if raspa_logs:
                         # Found RASPA output data - check for cycle information
                         try:
@@ -1665,9 +1667,8 @@ class JobScheduler:
                 
                 # For other steps, just report the step name
                 return step
-                
         # If no stage directories found but job is running
-        return "preparing"
+        return "unknown_stage (running)"
 
     def update_job_status_csv(self, job_id: str = None, batch_id: int = None, force_resubmission: bool = False):
         """
